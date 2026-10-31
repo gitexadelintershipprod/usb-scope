@@ -165,6 +165,33 @@ class UvcBulkDriverTest {
     }
 
     @Test
+    fun `invalid or excessive dimensions are refused before claiming or starting the camera`() {
+        for ((width, height) in listOf(0 to 480, 4097 to 1, 4096 to 4096, 46_341 to 46_341)) {
+            val t = transport().apply {
+                controlResponses[0x80 to 0x06] = UvcTestDescriptors.build(
+                    mjpegWidth = width, mjpegHeight = height,
+                )
+            }
+            val error = assertThrows(UvcUnsupportedException::class.java) { driver().open(t) }
+            assertTrue(error.message!!.contains("${width}x$height"))
+            assertTrue(t.calls.none { it.startsWith("claim ") || it.startsWith("alt ") })
+            assertTrue(slept.isEmpty())
+        }
+    }
+
+    @Test
+    fun `a UHD format is within the early decoded allocation limit`() {
+        val t = transport().apply {
+            controlResponses[0x80 to 0x06] = UvcTestDescriptors.build(
+                mjpegWidth = 3840, mjpegHeight = 2160,
+            )
+        }
+        val setup = driver().handshake(t)
+        assertEquals(3840, setup.width)
+        assertEquals(2160, setup.height)
+    }
+
+    @Test
     fun `open retries a transient failure without a device reset, releasing between attempts`() {
         val t = transport().apply { failuresBeforeSuccess = 3 }
         assertThrows(UsbException::class.java) { driver().open(t) }

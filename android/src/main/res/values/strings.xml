@@ -1,7 +1,7 @@
 <resources>
-    <string name="app_name">USB Scope</string>
+    <string name="app_name">USB Scope A17</string>
     <!-- Placeholder until the repository has a public home; tracked in phase3a-notes. -->
-    <string name="source_url">https://github.com/technicallyvu/usb-scope</string>
+    <string name="source_url">https://github.com/gitexadelintershipprod/usb-scope</string>
 
     <!-- Launcher icon: an all-vector adaptive icon (res/drawable/ic_launcher_background.xml,
          ic_launcher_foreground.xml and ic_launcher_monochrome.xml) - a phone with a USB-C plug and
@@ -137,4 +137,7 @@
     <string name="about_attributions_title">Attributions</string>
     <string name="about_attribution_detail_format">%1$s — %2$s</string>
     <string name="about_license_title">License</string>
+    <string name="status_camera_permission_denied">Camera permission is required by Android for this USB camera. Tap Allow USB access to try again; if no prompt appears, enable Camera in app settings.</string>
+    <string name="status_usb_request_failed_format">Could not request USB access: %1$s</string>
+    <string name="status_frame_too_large_format">Unsupported frame dimensions: %1$d × %2$d. Maximum: 4096 per side, 8 megapixels. Use a lower-resolution camera.</string>
 </resources>

@@ -113,4 +113,21 @@ class UvcDescriptorsTest {
         assertEquals(0x0110, device.bcdUvc)
         assertEquals(0, device.controlInterface)
     }
+
+    @Test
+    fun `one-byte descriptors stop parsing without reading a missing type byte`() {
+        assertNull(UvcDescriptors.parse(byteArrayOf(1)))
+        assertNull(UvcDescriptors.parse(byteArrayOf(1, 4)))
+
+        val config = UvcTestDescriptors.build(bulk = true)
+        val device = requireNotNull(UvcDescriptors.parse(config + byteArrayOf(1)))
+        assertEquals(0x0110, device.bcdUvc)
+        assertEquals(1, device.streaming.size)
+    }
+
+    @Test
+    fun `every truncated prefix is safe to parse`() {
+        val config = UvcTestDescriptors.build(bulk = true)
+        for (length in 0..config.size) UvcDescriptors.parse(config.copyOf(length))
+    }
 }

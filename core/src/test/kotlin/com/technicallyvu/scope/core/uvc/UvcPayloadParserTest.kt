@@ -115,6 +115,15 @@ class UvcPayloadParserTest {
     }
 
     @Test
+    fun `YUY2 byte count cannot wrap into a small accepted payload`() {
+        // 46341 * 46341 * 2 wraps to 9266 in 32-bit arithmetic.
+        val p = UvcPayloadParser(UvcFormatKind.YUY2, 46_341, 46_341, capacity)
+        assertTrue(p.feed(payload(FID0 or EOF, ByteArray(9_266))).isEmpty())
+        assertEquals(0, p.framesEmitted)
+        assertEquals(1, p.framesDropped)
+    }
+
+    @Test
     fun `a malformed header is counted under badHeaders and the stream resynchronises`() {
         val p = mjpeg()
         // bHeaderLength 0 (below the two mandatory bytes) and bHeaderLength past the end of the read.
@@ -176,6 +185,21 @@ class UvcPayloadParserTest {
         // 4 * 8 * 8 is below the 64 KiB floor, so the cap is 64 KiB * 2.
         assertTrue(p.bufferedBytes <= 131_072, "buffered ${p.bufferedBytes} bytes")
         assertTrue(p.framesDropped >= 1)
+    }
+
+    @Test
+    fun `an untrusted oversized descriptor cannot raise the absolute frame cap`() {
+        for (declared in listOf(0, Int.MAX_VALUE)) {
+            val p = UvcPayloadParser(UvcFormatKind.MJPEG, 65_535, 65_535, capacity, declared)
+            val chunk = payload(FID0, ByteArray(16_000) { 0x5A })
+            repeat(2_200) { assertTrue(p.feed(chunk).isEmpty()) }
+            assertEquals(1, p.framesDropped)
+            assertEquals(0, p.bufferedBytes)
+
+            val jpeg = TestPackets.fakeJpeg(40)
+            assertArrayEquals(jpeg, p.feed(payload(FID1 or EOF, jpeg)).single().jpegBytes())
+            assertEquals(1, p.framesEmitted)
+        }
     }
 
     @Test

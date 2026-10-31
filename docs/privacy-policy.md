@@ -1,8 +1,9 @@
 # USB Scope privacy policy
 
-**Effective date:** 14 September 2026
-**Applies to:** USB Scope for Android and USB Scope for Windows, published by TechnicallyVu (Anthony Vu)
-**Contact:** anthony@technicallyvu.com
+**Effective date:** 1 November 2026 (Android compatibility fork)
+**Applies to:** USB Scope A17, the independent Android compatibility fork.
+**Source and support:** https://github.com/gitexadelintershipprod/usb-scope
+Original USB Scope is by TechnicallyVu (Anthony Vu).
 
 USB Scope is a viewer for USB endoscope and borescope cameras. It shows the camera's live picture and saves
 photos and video clips when you ask it to. It does not collect, store, transmit, sell or share any personal
@@ -12,10 +13,10 @@ data. This page explains that in the detail app stores and privacy laws ask for.
 
 - The app has **no internet access**. On Android it does not request the INTERNET permission, so the
   operating system will not let it open a network connection at all.
-- The app requests **no permissions**. Not camera, not microphone, not location, not contacts, not storage,
-  not notifications.
-- There is **no account**, no sign-in, no analytics, no crash reporting, no advertising and no third-party
-  software development kit of any kind inside the app.
+- The app declares **Camera** permission because Android requires it for video-class USB cameras. It is
+  requested only when such a USB device needs it. USB access also requires approval for each connected device.
+  No microphone, location, contacts, storage or notification permissions are requested.
+- There is **no account**, no sign-in, no analytics, no crash reporting, no advertising and no advertising or telemetry SDK. The app uses AndroidX, Compose and Kotlin libraries.
 - Everything the app produces stays **on your device**, in files you own and can delete.
 
 ## What the app does with your data
@@ -33,8 +34,8 @@ When you tap Snapshot or Record, or use the cable button, the app writes a JPEG 
 device's normal media storage, in an album called **USB Scope**. On Android this goes through the system
 media store, which is why the app needs no storage permission; the files appear in your Gallery like any
 photo. On Windows they are written to the folder you chose. The files contain the picture, the time they
-were taken and an orientation tag. They contain no location and no identifying information beyond what is
-visible in the picture. You can view, share or delete them with any other app; USB Scope never reads them
+were taken and an orientation tag. The app adds no location or device identifiers. Unfiltered JPEG snapshots may retain metadata
+provided by the USB camera itself. You can view, share or delete them with any other app; USB Scope never reads them
 back.
 
 ### Settings
@@ -80,16 +81,15 @@ side. Anything the app produced is in files on your own device and under your co
 
 - The app is open source under the MIT licence. Anyone can read the code and rebuild it.
 - The Android build fails on purpose if the INTERNET permission ever appears in the app's manifest.
-- The About screen in the app lists the number of permissions requested (zero) and the sensitive permissions
-  it specifically does not have.
-- On Android, Settings → Apps → USB Scope → Permissions shows "No permissions requested".
+- The About screen lists the system permission count and the sensitive permissions the app does not request.
+- Android Settings → Apps → USB Scope A17 → Permissions lists Camera; it can be revoked at any time.
 
 ## Changes to this policy
 
 If a future version of the app ever changes what it does with data, this page will be updated, the effective
 date at the top will change, and the app's release notes will say so. The current version of this policy
-always lives at https://technicallyvu.com/usb-scope/privacy and in the project's source repository.
+for this fork lives in its source repository. The upstream website describes the original app.
 
 ## Contact
 
-Questions about this policy: anthony@technicallyvu.com
+Questions about this fork: https://github.com/gitexadelintershipprod/usb-scope/issues

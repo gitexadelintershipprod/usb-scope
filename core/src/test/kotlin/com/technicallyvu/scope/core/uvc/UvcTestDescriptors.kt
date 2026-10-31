@@ -64,6 +64,8 @@ object UvcTestDescriptors {
         includeYuy2: Boolean = true,
         /** The 16 `guidFormat` bytes to emit, so a test can hand in a literal blob of its own. */
         uncompressedGuid: ByteArray = YUY2_GUID,
+        mjpegWidth: Int = 640,
+        mjpegHeight: Int = 480,
     ): ByteArray {
         require(uncompressedGuid.size == 16) { "guidFormat must be 16 bytes" }
         val out = mutableListOf<Byte>()
@@ -104,8 +106,8 @@ object UvcTestDescriptors {
 
         // FRAME_MJPEG 640x480 (30)
         out.raw(0x1E, 0x24, 0x07, 0x01, 0x00)
-        out.le16(640)
-        out.le16(480)
+        out.le16(mjpegWidth)
+        out.le16(mjpegHeight)
         out.le32(0) // dwMinBitRate
         out.le32(0) // dwMaxBitRate
         out.le32(614_400) // dwMaxVideoFrameBufferSize

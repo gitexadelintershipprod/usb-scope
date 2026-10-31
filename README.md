@@ -1,7 +1,24 @@
-# USB Scope
+# USB Scope A17 (Android compatibility fork)
+
+## Latest update — 2026-11-01
+
+This fork fixes USB video-camera permission handling on modern Android, including Android 17.
+Android requires Camera permission for video-class USB devices: allow **Camera**, then **USB access**.
+Vendor-class endoscopes still need only the per-device USB approval. Denied permissions remain retryable.
+Malformed USB descriptors and oversized frames are rejected to reduce crash and memory-exhaustion risks.
+See [release notes](docs/releases/release-notes.md) and [security review](docs/security-review-a17.md).
+
+The Android app is named **USB Scope A17**, package `com.gitexadelintershipprod.usbscope`, so it can be
+installed alongside the Play version. It uses an independent signing certificate. No internet, audio,
+location, contacts or storage permission is requested. Original source: [TechnicallyVu](https://github.com/technicallyvu/usb-scope).
+
+A successful build does not establish live USB compatibility: the user's Android 17 phone and camera
+must still be tested. Generic UVC cameras with isochronous endpoints remain unsupported by the original driver.
+
+## Upstream project
 
 Privacy-first, open-source viewer for cheap USB endoscopes that ship with untrusted vendor apps.
-The full privacy policy is in [docs/privacy-policy.md](docs/privacy-policy.md): no permissions, no network, no data collected.
+The full privacy policy is in [docs/privacy-policy.md](docs/privacy-policy.md): conditional Camera permission for USB video devices, no network, no data collected.
 First supported device: USB 2CE3:3828 / 0329:2022 endoscopes. Verified on hardware in the `i4season-yuv`
 personality (single interface, YUYV); the `useeplus` personality (dual interface, MJPEG) is implemented
 from public protocol documentation and has not been exercised on a device here.
@@ -38,13 +55,12 @@ Phases 2, 3a and 3b followed; next is launch prep (see `docs/next-steps.md`).
     C:\platform-tools\adb.exe install -r android\build\outputs\apk\debug\android-debug.apk
 
 Plug the endoscope into the phone; Android offers to open USB Scope. Photos go to Pictures/USB Scope and clips to
-Movies/USB Scope through MediaStore, so the app requests no system permissions at all. (The trust screen reports
-"Permissions requested: 0". The merged manifest does contain one app-private signature permission injected by
-AndroidX for its own broadcast receivers — it is defined by the app, granted only to the app, invisible to every
-other app, and is not a system permission; the count excludes it and says so in a footnote.) Debug builds add a
+Movies/USB Scope through MediaStore without storage permission. Camera permission is declared and requested
+only for USB video-class devices; Android requires it even though this app reads USB directly. The About screen
+reports the manifest permission count and excludes the app-private AndroidX signature permission. Debug builds add a
 developer sheet — replay the bundled capture without hardware, log per-second frame timing under the tag
 `ScopeViewModel`, copy diagnostics — reached by a long-press on the version line in About. Requires the Android SDK
-(compileSdk 37, targetSdk 36, minSdk 29); see `docs/dependencies.md`.
+(compileSdk 37, targetSdk 37, minSdk 29); see `docs/dependencies.md`.
 
 Phase 2 accepted 2026-09-10 on a Galaxy Z Fold 7. Notes: `docs/phase2-notes.md`, then `docs/phase3b-notes.md`.
 

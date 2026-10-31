@@ -51,7 +51,7 @@ object TrustInfo {
      * Where the source lives. Placeholder until the repository has a public home; Android renders
      * the same URL from the `source_url` string resource.
      */
-    val sourceUrl: String = "https://github.com/technicallyvu/usb-scope"
+    val sourceUrl: String = "https://github.com/gitexadelintershipprod/usb-scope"
 
     /**
      * "Support this project" on the **desktop** About dialog only.
@@ -82,7 +82,6 @@ object TrustInfo {
 
     val permissionsNotRequested: List<String> = listOf(
         "android.permission.INTERNET",
-        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",

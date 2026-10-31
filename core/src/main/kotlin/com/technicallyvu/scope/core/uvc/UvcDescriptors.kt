@@ -118,7 +118,9 @@ object UvcDescriptors {
         var i = 0
         while (i < size) {
             val bLength = u8(i)
-            if (bLength == 0 || i + bLength > size) break
+            // Every descriptor needs both bLength and bDescriptorType. A one-byte record,
+            // especially at the end of a truncated reply, has no type byte to inspect.
+            if (bLength < 2 || bLength > size - i) break
             val bDescriptorType = u8(i + 1)
 
             when (bDescriptorType) {

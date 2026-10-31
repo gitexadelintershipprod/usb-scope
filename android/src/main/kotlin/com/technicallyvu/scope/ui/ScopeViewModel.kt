@@ -1,11 +1,14 @@
 package com.technicallyvu.scope.ui
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.util.Log
 import androidx.annotation.StringRes
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -53,6 +56,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /** Which full-screen destination is showing. */
@@ -109,7 +113,9 @@ data class UiState(
 
 class ScopeViewModel(app: Application, private val appSettings: AppSettings) : AndroidViewModel(app) {
     private val usbManager = app.getSystemService(UsbManager::class.java)
-    private val usbDevices = AndroidDeviceSource(usbManager)
+    private val usbDevices = AndroidDeviceSource(usbManager) {
+        ContextCompat.checkSelfPermission(app, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+    }
     private val saver = MediaStoreSaver(app)
 
     // The stats overlay is a persisted preference; the initial UI state has to agree with the store
@@ -336,7 +342,12 @@ class ScopeViewModel(app: Application, private val appSettings: AppSettings) : A
         stateJob?.cancel()
         val token = ++nextSessionToken
         currentSessionToken = token
-        val sink = SessionSink(token, FrameBitmaps())
+        val rejectedSizeReported = AtomicBoolean(false)
+        val sink = SessionSink(token, FrameBitmaps { width, height ->
+            if (rejectedSizeReported.compareAndSet(false, true)) {
+                message(R.string.status_frame_too_large_format, width, height)
+            }
+        })
         currentSink = sink
         val newSession = ScopeSession(devices, DriverRegistry.all, viewModelScope, sink = sink)
         session = newSession
@@ -553,14 +564,24 @@ class ScopeViewModel(app: Application, private val appSettings: AppSettings) : A
     }
 
     // ---- USB events from the activity ----
-    fun onDeviceDetached(deviceName: String) = usbDevices.onDetached(deviceName)
+    fun onDeviceDetached(deviceName: String) {
+        usbDevices.onDetached(deviceName)
+        _ui.update { if (it.permissionDevice?.deviceName == deviceName) it.copy(permissionDevice = null) else it }
+    }
 
-    fun onPermissionResult(granted: Boolean) {
-        usbDevices.pendingPermission = null
-        val denied = if (granted) null else getApplication<Application>().getString(R.string.status_permission_denied)
+    fun onPermissionResult(
+        deviceName: String,
+        granted: Boolean,
+        deniedMessage: String? = null,
+    ) {
+        // A denial leaves the same attachment available for an explicit retry. Do not depend
+        // on the next Connecting/Failed poll reaching Main: StateFlow can conflate those states.
+        if (granted) usbDevices.clearPermissionRequest(deviceName)
+        val denied = if (granted) null else deniedMessage
+            ?: getApplication<Application>().getString(R.string.status_permission_denied)
         _ui.update {
             it.copy(
-                permissionDevice = null,
+                permissionDevice = if (granted && it.permissionDevice?.deviceName == deviceName) null else it.permissionDevice,
                 message = denied,
                 messageTick = if (denied == null) it.messageTick else it.messageTick + 1,
             )

@@ -9,13 +9,14 @@ plugins {
 android {
     namespace = "com.technicallyvu.scope"
     compileSdk = 37
+    buildToolsVersion = "37.0.0"
 
     defaultConfig {
-        applicationId = "com.technicallyvu.scope"
+        applicationId = "com.gitexadelintershipprod.usbscope"
         minSdk = 29
-        targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.1"
+        targetSdk = 37
+        versionCode = 4
+        versionName = "0.3.1-a17.1"
         buildConfigField("String", "GIT_SHA", "\"${gitShortSha()}\"")
     }
 

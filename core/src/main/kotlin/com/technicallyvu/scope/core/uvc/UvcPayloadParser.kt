@@ -49,7 +49,9 @@ class UvcPayloadParser(
     /**
      * Hard ceiling on the bytes buffered for one frame: twice the larger of the declared frame size
      * and a 64 KiB floor. The floor is applied *before* the doubling, so the smallest cap this can
-     * produce is 128 KiB however tiny the declared frame is. A legitimately over-long frame (a
+     * produce is 128 KiB however tiny the declared frame is. An absolute 32 MiB ceiling also
+     * applies because the descriptor and negotiated sizes come from an untrusted USB device.
+     * A legitimately over-long frame (a
      * device that pads, or a JPEG that beats the declared maximum) still arrives; a runaway stream
      * is cut off early.
      */
@@ -60,7 +62,7 @@ class UvcPayloadParser(
             UvcFormatKind.YUY2 -> width.toLong() * height.toLong() * 2 + 65_536
             else -> 4L * width.toLong() * height.toLong()
         }
-        maxOf(declared, MIN_FRAME_CAP) * 2
+        minOf(maxOf(declared, MIN_FRAME_CAP) * 2, MAX_FRAME_CAP)
     }
 
     /** Bytes still expected in the payload being read; 0 means the next chunk starts a new payload. */
@@ -177,7 +179,9 @@ class UvcPayloadParser(
 
         val data = when (kind) {
             UvcFormatKind.MJPEG -> if (FrameReassembler.isJpeg(bytes)) FrameData.Jpeg(bytes) else null
-            UvcFormatKind.YUY2 -> if (bytes.size == width * height * 2) FrameData.Yuyv422(width, height, bytes) else null
+            UvcFormatKind.YUY2 -> if (width > 0 && height > 0 &&
+                bytes.size.toLong() == width.toLong() * height.toLong() * 2
+            ) FrameData.Yuyv422(width, height, bytes) else null
             UvcFormatKind.OTHER -> null
         }
         if (data == null) {
@@ -202,5 +206,6 @@ class UvcPayloadParser(
 
         /** Floor under the declared frame size, so a tiny or undeclared format still gets room. */
         const val MIN_FRAME_CAP = 65_536L
+        const val MAX_FRAME_CAP = 32L * 1024 * 1024
     }
 }

@@ -1,6 +1,7 @@
 package com.technicallyvu.scope.core
 
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 
 class TrustInfoTest {
@@ -36,7 +37,7 @@ class TrustInfoTest {
     fun `permissions not requested lists the sensitive android permissions`() {
         val perms = TrustInfo.permissionsNotRequested
         assertTrue(perms.contains("android.permission.INTERNET"))
-        assertTrue(perms.contains("android.permission.CAMERA"))
+        assertFalse(perms.contains("android.permission.CAMERA"))
         assertTrue(perms.contains("android.permission.RECORD_AUDIO"))
         assertTrue(perms.contains("android.permission.ACCESS_FINE_LOCATION"))
         assertTrue(perms.contains("android.permission.READ_CONTACTS"))

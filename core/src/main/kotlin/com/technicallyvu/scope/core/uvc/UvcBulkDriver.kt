@@ -130,6 +130,18 @@ class UvcBulkDriver(
             ?: format.frames.firstOrNull()
             ?: throw UvcUnsupportedException("this camera's format declares no frame sizes")
 
+        // Validate before starting a stream: YUYV filters run before Android's bitmap converter,
+        // so rejecting huge dimensions only in the renderer is too late to bound allocations.
+        // These limits match the Android renderer's decoded-frame limits.
+        if (frame.width !in 1..MAX_FRAME_DIMENSION || frame.height !in 1..MAX_FRAME_DIMENSION ||
+            frame.width.toLong() * frame.height.toLong() > MAX_FRAME_PIXELS
+        ) {
+            throw UvcUnsupportedException(
+                "Camera frame ${frame.width}x${frame.height} exceeds the supported size " +
+                    "(4096 per side, 8 megapixels). Use a lower-resolution camera.",
+            )
+        }
+
         claimed += device.controlInterface
         t.claimInterface(device.controlInterface)
         claimed += vs.number
@@ -179,6 +191,8 @@ class UvcBulkDriver(
         const val DEFAULT_MAX_PAYLOAD = 16384
         const val OPEN_ATTEMPTS = 3
         const val RETRY_WAIT_MS = 1500L
+        private const val MAX_FRAME_DIMENSION = 4096
+        private const val MAX_FRAME_PIXELS = 8_388_608L
     }
 }
 

@@ -79,6 +79,26 @@ class FrameReassemblerTest {
     }
 
     @Test
+    fun `a constant frame id cannot grow the buffer without limit and the next frame recovers`() {
+        val r = FrameReassembler()
+        val data = ByteArray(16_000) { 0x5A }
+        repeat(600) {
+            assertNull(r.accept(chunk(packet(7, 1, data)), 0))
+            assertTrue(r.bufferedBytes <= FrameReassembler.MAX_FRAME_BYTES)
+        }
+        assertEquals(1, r.framesDropped, "an oversized frame is counted only once")
+        assertEquals(0, r.framesEmitted)
+        assertEquals(0, r.bufferedBytes)
+
+        val jpeg = TestPackets.fakeJpeg()
+        assertNull(r.accept(chunk(packet(7, 2, jpeg)), 1))
+        val recovered = r.accept(chunk(packet(7, 3, TestPackets.SOI)), 2)!!
+        assertArrayEquals(jpeg, recovered.jpegBytes())
+        assertEquals(1, r.framesEmitted)
+        assertEquals(1, r.framesDropped)
+    }
+
+    @Test
     fun `isJpeg requires both markers`() {
         assertTrue(FrameReassembler.isJpeg(TestPackets.fakeJpeg()))
         assertFalse(FrameReassembler.isJpeg(TestPackets.SOI + byteArrayOf(0)))

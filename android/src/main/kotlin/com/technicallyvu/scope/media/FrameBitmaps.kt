@@ -9,7 +9,7 @@ import com.technicallyvu.scope.core.image.TemporalDenoiser
 import com.technicallyvu.scope.core.image.YuyvConverter
 
 /** Converts frames to bitmaps and applies the view transform. Reuses its pixel buffer; use from one thread. */
-class FrameBitmaps {
+class FrameBitmaps(private val onUnsupportedSize: (width: Int, height: Int) -> Unit = { _, _ -> }) {
     private var argb = IntArray(0)
     private var jpegPixels = IntArray(0)
 
@@ -23,30 +23,45 @@ class FrameBitmaps {
         argbSharpener: Sharpener? = null,
     ): Bitmap? = when (data) {
         is FrameData.Jpeg -> {
-            // Mutable only when a filter needs to write pixels back into it; an immutable decode is
-            // cheaper and, for the unfiltered path, is what the rest of the app assumes.
-            val filtering = argbDenoiser != null || argbSharpener != null
-            val opts = BitmapFactory.Options().apply {
-                inMutable = filtering
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+            // JPEG dimensions are supplied by the USB device. Check them before the platform
+            // decoder allocates pixels; a small compressed frame can otherwise exhaust the heap.
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(data.bytes, 0, data.bytes.size, bounds)
+            if (!supportedSize(bounds.outWidth, bounds.outHeight)) null else {
+                // Mutable only when a filter needs to write pixels back into it; an immutable
+                // decode is cheaper and is what the rest of the unfiltered path assumes.
+                val filtering = argbDenoiser != null || argbSharpener != null
+                val opts = BitmapFactory.Options().apply {
+                    inMutable = filtering
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                val bmp = BitmapFactory.decodeByteArray(data.bytes, 0, data.bytes.size, opts)
+                if (bmp != null && filtering) {
+                    val n = bmp.width * bmp.height
+                    if (jpegPixels.size < n) jpegPixels = IntArray(n)
+                    bmp.getPixels(jpegPixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+                    argbDenoiser?.applyArgb(jpegPixels, bmp.width, bmp.height)
+                    argbSharpener?.applyArgb(jpegPixels, bmp.width, bmp.height)
+                    bmp.setPixels(jpegPixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+                }
+                bmp
             }
-            val bmp = BitmapFactory.decodeByteArray(data.bytes, 0, data.bytes.size, opts)
-            if (bmp != null && filtering) {
-                val n = bmp.width * bmp.height
-                if (jpegPixels.size < n) jpegPixels = IntArray(n)
-                bmp.getPixels(jpegPixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
-                argbDenoiser?.applyArgb(jpegPixels, bmp.width, bmp.height)
-                argbSharpener?.applyArgb(jpegPixels, bmp.width, bmp.height)
-                bmp.setPixels(jpegPixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
-            }
-            bmp
         }
         is FrameData.Yuyv422 -> {
-            val n = data.width * data.height
-            if (argb.size < n) argb = IntArray(n)
-            YuyvConverter.toArgb(data, argb)
-            Bitmap.createBitmap(argb, data.width, data.height, Bitmap.Config.ARGB_8888)
+            if (!supportedSize(data.width, data.height)) null else {
+                val n = data.width * data.height
+                if (argb.size < n) argb = IntArray(n)
+                YuyvConverter.toArgb(data, argb)
+                Bitmap.createBitmap(argb, data.width, data.height, Bitmap.Config.ARGB_8888)
+            }
         }
+    }
+
+    private fun supportedSize(width: Int, height: Int): Boolean {
+        if (FrameSizeLimits.supports(width, height)) return true
+        // Negative bounds mean an undecodable JPEG, not an oversized image.
+        if (width > 0 && height > 0) onUnsupportedSize(width, height)
+        return false
     }
 
     /** Mirror horizontally (if asked), then rotate clockwise. Returns [src] itself when nothing changes. */
