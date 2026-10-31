@@ -15,8 +15,8 @@ android {
         applicationId = "com.gitexadelintershipprod.usbscope"
         minSdk = 29
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.3.1-a17.1"
+        versionCode = 5
+        versionName = "0.3.1-a17.2"
         buildConfigField("String", "GIT_SHA", "\"${gitShortSha()}\"")
     }
 

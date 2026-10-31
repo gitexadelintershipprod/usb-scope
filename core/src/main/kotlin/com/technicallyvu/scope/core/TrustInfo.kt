@@ -70,7 +70,7 @@ object TrustInfo {
 
     /** Android: the claim rests on a permission the manifest does not ask for. */
     val noNetworkStatement: String =
-        "This app does not request the INTERNET permission, so it cannot send anything anywhere. " +
+        "This app does not request the INTERNET permission and opens no network connections. " +
             "It has no analytics, no crash reporting, and no accounts."
 
     /**

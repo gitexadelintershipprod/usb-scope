@@ -23,11 +23,11 @@
     <string name="snapshot_saved">Saved</string>
 
     <!-- ===== Live-view prompts (shown in place of the image) ===== -->
-    <string name="live_view_no_device">Plug in your endoscope.</string>
+    <string name="live_view_no_device">Plug in your endoscope. If it is already connected, open USB diagnostics.</string>
     <string name="live_view_connecting">Connecting…</string>
     <string name="live_view_waiting_first_frame">Waiting for the first frame…</string>
     <string name="live_view_permission_needed">USB permission needed.</string>
-    <string name="live_view_error_format">Could not start the device.\n%1$s\nRetrying automatically.</string>
+    <string name="live_view_error_format">Could not start the camera.\n%1$s\nOpen USB diagnostics for details.</string>
     <string name="stats_overlay_format">%1$.1f fps  frames %2$d  partial %3$d  dropped %4$d  %5$.1f MB</string>
 
     <!-- ===== Errors surfaced as a snackbar message ===== -->
@@ -140,4 +140,10 @@
     <string name="status_camera_permission_denied">Camera permission is required by Android for this USB camera. Tap Allow USB access to try again; if no prompt appears, enable Camera in app settings.</string>
     <string name="status_usb_request_failed_format">Could not request USB access: %1$s</string>
     <string name="status_frame_too_large_format">Unsupported frame dimensions: %1$d × %2$d. Maximum: 4096 per side, 8 megapixels. Use a lower-resolution camera.</string>
+    <string name="usb_diagnostics_title">USB diagnostics</string>
+    <string name="usb_diagnostics_help">Keep your endoscope connected. This report shows whether Android detects it and which connection types it offers. Choose your camera before allowing USB access. Tap Copy report and paste it into your support chat; nothing is sent automatically.</string>
+    <string name="usb_diagnostics_allow_format">Allow USB access — %1$s</string>
+    <string name="usb_diagnostics_loading">Reading USB devices…</string>
+    <string name="usb_diagnostics_copy">Copy report</string>
+    <string name="usb_diagnostics_copied">Copied</string>
 </resources>

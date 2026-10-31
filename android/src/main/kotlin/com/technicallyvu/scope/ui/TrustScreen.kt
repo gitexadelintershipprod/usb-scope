@@ -27,6 +27,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -63,7 +64,11 @@ import com.technicallyvu.scope.core.TrustInfo
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun TrustScreen(onBack: () -> Unit, devControls: DevControls? = null) {
+fun TrustScreen(
+    onBack: () -> Unit,
+    devControls: DevControls? = null,
+    onUsbDiagnostics: () -> Unit = {},
+) {
     BackHandler(enabled = true, onBack = onBack)
     val context = LocalContext.current
     // The merged manifest asks for more than `src/main` declares: AndroidX injects
@@ -155,6 +160,9 @@ fun TrustScreen(onBack: () -> Unit, devControls: DevControls? = null) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            item {
+                Button(onClick = onUsbDiagnostics) { Text(stringResource(R.string.usb_diagnostics_title)) }
             }
             item { HorizontalDivider() }
             item { Text(noNetworkStatement, style = MaterialTheme.typography.bodyMedium) }

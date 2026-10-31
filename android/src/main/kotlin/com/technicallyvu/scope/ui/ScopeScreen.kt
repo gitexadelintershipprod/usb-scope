@@ -80,6 +80,14 @@ private const val BOTTOM_CHROME_MAX_FRACTION = 0.6f
 @Composable
 fun ScopeScreen(vm: ScopeViewModel, onRequestPermission: (UsbDevice) -> Unit) {
     val ui by vm.ui.collectAsState()
+    var showUsbDiagnostics by remember { mutableStateOf(false) }
+    if (showUsbDiagnostics) {
+        UsbDiagnosticsDialog(
+            status = usbDiagnosticStatus(ui.session.connection),
+            onDismiss = { showUsbDiagnostics = false },
+            onRequestPermission = onRequestPermission,
+        )
+    }
     // No activity (a preview, or a non-activity context): fall back to the compact layout rather
     // than crashing on a cast.
     val activity = LocalActivity.current
@@ -132,6 +140,7 @@ fun ScopeScreen(vm: ScopeViewModel, onRequestPermission: (UsbDevice) -> Unit) {
             TrustScreen(
                 onBack = remember(vm, returnTo) { { vm.navigate(returnTo) } },
                 devControls = devControls,
+                onUsbDiagnostics = { showUsbDiagnostics = true },
             )
             return
         }
@@ -298,6 +307,12 @@ fun ScopeScreen(vm: ScopeViewModel, onRequestPermission: (UsbDevice) -> Unit) {
                         onClick = { onInteract(); onRequestPermission(device) },
                         modifier = Modifier.padding(horizontal = 12.dp),
                     ) { Text(stringResource(R.string.action_allow_usb_access)) }
+                }
+                if (!streaming) {
+                    Button(
+                        onClick = { onInteract(); showUsbDiagnostics = true },
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                    ) { Text(stringResource(R.string.usb_diagnostics_title)) }
                 }
                 SnackbarHost(snackbarHostState)
                 if (!wide) {

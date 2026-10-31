@@ -33,6 +33,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 class ScopeSessionTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -362,6 +363,43 @@ class ScopeSessionTest {
         kotlinx.coroutines.delay(300)   // several more poll intervals
         assertEquals(1, devices.opens(unopenable), "a permanently unsupported device must never be opened again")
         assertTrue(s.state.value.connection is ConnectionState.Streaming)
+        s.stop()
+    }
+
+    @Test
+    fun `an attached unsupported camera keeps its reason until detach and a reused address is retried`(): Unit = runBlocking {
+        val attached = AtomicReference(listOf(ref))
+        val polls = AtomicInteger()
+        val opens = AtomicInteger()
+        val reason = "This camera uses unsupported isochronous transfers"
+        val devices = object : DeviceSource {
+            override fun list(): List<DeviceRef> {
+                polls.incrementAndGet()
+                return attached.get()
+            }
+            override fun open(ref: DeviceRef): UsbTransport {
+                opens.incrementAndGet()
+                throw UvcUnsupportedException(reason)
+            }
+        }
+        val s = session(devices, CountingSink())
+        s.start()
+        withTimeout(5_000) {
+            s.state.first { (it.connection as? ConnectionState.Failed)?.message == reason }
+            while (polls.get() < 6) kotlinx.coroutines.delay(10)
+        }
+        assertEquals(ConnectionState.Failed(reason), s.state.value.connection)
+        assertEquals(1, opens.get(), "a rejected attachment must not be repeatedly opened")
+
+        attached.set(emptyList())
+        withTimeout(5_000) { s.state.first { it.connection is ConnectionState.NoDevice } }
+
+        attached.set(listOf(ref)) // Android may reuse a path and device id on a later attachment.
+        withTimeout(5_000) {
+            s.state.first { (it.connection as? ConnectionState.Failed)?.message == reason }
+            while (opens.get() < 2) kotlinx.coroutines.delay(10)
+        }
+        assertEquals(2, opens.get())
         s.stop()
     }
 

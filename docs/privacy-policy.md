@@ -6,8 +6,7 @@
 Original USB Scope is by TechnicallyVu (Anthony Vu).
 
 USB Scope is a viewer for USB endoscope and borescope cameras. It shows the camera's live picture and saves
-photos and video clips when you ask it to. It does not collect, store, transmit, sell or share any personal
-data. This page explains that in the detail app stores and privacy laws ask for.
+photos and video clips when you ask it to. It sends no telemetry and does not sell or automatically share personal data. It stores local preferences and user-requested media, and can display a local USB diagnostic report. This page explains that in the detail app stores and privacy laws ask for.
 
 ## The short version
 
@@ -16,7 +15,7 @@ data. This page explains that in the detail app stores and privacy laws ask for.
 - The app declares **Camera** permission because Android requires it for video-class USB cameras. It is
   requested only when such a USB device needs it. USB access also requires approval for each connected device.
   No microphone, location, contacts, storage or notification permissions are requested.
-- There is **no account**, no sign-in, no analytics, no crash reporting, no advertising and no advertising or telemetry SDK. The app uses AndroidX, Compose and Kotlin libraries.
+- There is **no account**, no sign-in, no analytics, no crash reporting, no advertising or telemetry SDK. The app uses AndroidX, Compose and Kotlin libraries.
 - Everything the app produces stays **on your device**, in files you own and can delete.
 
 ## What the app does with your data
@@ -52,11 +51,19 @@ product number, and for some models a short name and firmware version). These de
 not you. They are shown on screen when relevant and are not stored anywhere except as the key for the
 per-model rotation setting above.
 
+### Local USB diagnostics
+
+When you open USB diagnostics, the app reads the devices Android currently exposes: USB vendor/product IDs,
+interface classes, alternate settings and endpoint types, together with app/Android versions, phone model and
+permission states. It reads no serial number, does not open a USB connection for the report, and does not save
+or transmit the report automatically. Copy report writes the displayed text and viewer status to your clipboard
+only when tapped. Sharing that text with support is your choice.
+
 ### Nothing else
 
 The app does not read your contacts, calendar, location, phone state, clipboard, other apps, or any file it
-did not create. It does not run in the background when you are not using it and starts only when you open it
-or plug in a supported camera.
+did not create. It has no background service or boot autostart. An already active USB session or recording may
+continue after pressing Home while the process survives; stop recording in the app before leaving it.
 
 ## Links that leave the app
 

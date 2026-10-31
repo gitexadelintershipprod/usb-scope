@@ -2,7 +2,13 @@
 
 ## Latest update — 2026-11-01
 
+[Download the Android APK with USB diagnostics](https://github.com/gitexadelintershipprod/usb-scope/releases/download/v0.3.1-a17.2/USB-Scope-A17-0.3.1-a17.2.apk)
+
 This fork fixes USB video-camera permission handling on modern Android, including Android 17.
+The latest Android build adds **USB diagnostics** on the no-picture and About screens: inspect every attached
+USB device, allow access to your camera, and copy the local report when the camera does not connect.
+Unsupported-camera reasons now remain visible until detach instead of turning into a misleading "No device".
+Diagnostics identifies missing permissions and unsupported USB transports; it does not add isochronous streaming.
 Android requires Camera permission for video-class USB devices: allow **Camera**, then **USB access**.
 Vendor-class endoscopes still need only the per-device USB approval. Denied permissions remain retryable.
 Malformed USB descriptors and oversized frames are rejected to reduce crash and memory-exhaustion risks.

@@ -114,6 +114,7 @@ class ScopeSession(
      */
     private var lastPressNanos: Long? = null
     private val candidates = DeviceCandidates(drivers)
+    private var rejectedDeviceMessage: String? = null
 
     /**
      * A second press within this long of the first toggles recording instead of snapshotting
@@ -139,7 +140,11 @@ class ScopeSession(
                 try {
                     val found = candidates.next(findCandidates())
                     if (found == null) {
-                        _state.update { it.copy(connection = ConnectionState.NoDevice(driverHintCheck())) }
+                        val rejection = rejectedDeviceMessage
+                        _state.update {
+                            it.copy(connection = if (rejection != null) ConnectionState.Failed(rejection)
+                                else ConnectionState.NoDevice(driverHintCheck()))
+                        }
                     } else {
                         session(found.first, found.second)
                     }
@@ -245,8 +250,9 @@ class ScopeSession(
 
     /** Every attached device a driver claims, in enumeration order. A list error means "none, this poll". */
     private fun findCandidates(): List<Pair<DeviceRef, DeviceDriver>> = try {
-        candidates.candidates(devices.list())
+        candidates.candidates(devices.list()).also { rejectedDeviceMessage = candidates.rejectionReason() }
     } catch (e: UsbException) {
+        rejectedDeviceMessage = null
         emptyList()
     }
 
