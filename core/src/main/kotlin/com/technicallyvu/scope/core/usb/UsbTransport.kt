@@ -4,6 +4,22 @@ import java.util.Locale
 
 open class UsbException(message: String, val code: Int = 0, cause: Throwable? = null) : Exception(message, cause)
 
+/** One failed/lost isochronous packet; the current video frame must not be emitted as intact. */
+const val ISO_PACKET_ERROR = -1
+
+/**
+ * A queued isochronous IN stream. A positive [readPacket] result is exactly one completed USB
+ * service-interval packet (including its UVC header), never several concatenated packets. Native
+ * implementations may batch URBs internally but must retain each packet's length and status.
+ * 0 means timeout or an empty packet; [ISO_PACKET_ERROR] marks a damaged/lost packet. Transport
+ * failures throw [UsbException]. Reads must return within [timeoutMs]; close is idempotent and
+ * cancels and releases every outstanding native request before returning.
+ */
+interface IsochronousStream : AutoCloseable {
+    fun readPacket(buffer: ByteArray, timeoutMs: Int): Int
+    override fun close()
+}
+
 /** One interface of the active configuration (alternate setting 0). */
 data class UsbInterfaceInfo(val number: Int, val usbClass: Int, val subclass: Int, val protocol: Int)
 
@@ -19,6 +35,12 @@ data class UsbDeviceInfo(
 
 /** The USB primitives a driver needs. One implementation per platform. */
 interface UsbTransport : AutoCloseable {
+    val supportsIsochronous: Boolean get() = false
+
+    /** Called after selecting the streaming alternate setting; [packetSize] is its effective capacity. */
+    fun openIsochronous(endpoint: Int, packetSize: Int): IsochronousStream =
+        throw UsbException("Isochronous USB streaming is unavailable on this platform")
+
     fun claimInterface(iface: Int)
     fun releaseInterface(iface: Int)
     /**

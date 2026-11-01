@@ -66,6 +66,9 @@ object UvcTestDescriptors {
         uncompressedGuid: ByteArray = YUY2_GUID,
         mjpegWidth: Int = 640,
         mjpegHeight: Int = 480,
+        additionalMjpegFrames: List<Pair<Int, Int>> = emptyList(),
+        isoMaxPacketSize: Int = 1024,
+        isoAdditionalAlternates: List<Pair<Int, Int>> = emptyList(),
     ): ByteArray {
         require(uncompressedGuid.size == 16) { "guidFormat must be 16 bytes" }
         val out = mutableListOf<Byte>()
@@ -102,7 +105,7 @@ object UvcTestDescriptors {
         out.raw(0x81, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00)
 
         // FORMAT_MJPEG (11): index 1, default frame 1
-        out.raw(0x0B, 0x24, 0x06, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00)
+        out.raw(0x0B, 0x24, 0x06, 0x01, 1 + additionalMjpegFrames.size, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00)
 
         // FRAME_MJPEG 640x480 (30)
         out.raw(0x1E, 0x24, 0x07, 0x01, 0x00)
@@ -114,6 +117,13 @@ object UvcTestDescriptors {
         out.le32(333_333) // dwDefaultFrameInterval
         out.raw(0x01) // bFrameIntervalType
         out.le32(333_333) // dwFrameInterval(1)
+
+        additionalMjpegFrames.forEachIndexed { index, (width, height) ->
+            out.raw(0x1E, 0x24, 0x07, index + 2, 0x00)
+            out.le16(width); out.le16(height)
+            out.le32(0); out.le32(0); out.le32(width * height * 2)
+            out.le32(333_333); out.raw(0x01); out.le32(333_333)
+        }
 
         if (includeYuy2) {
             // FORMAT_UNCOMPRESSED / YUY2 (27): index 2, default frame 1
@@ -144,8 +154,14 @@ object UvcTestDescriptors {
             // VS interface, alt 1 (9) carrying the isochronous endpoint
             out.raw(0x09, 0x04, 0x01, 0x01, 0x01, 0x0E, 0x02, 0x00, 0x00)
             out.raw(0x07, 0x05, 0x81, 0x05)
-            out.le16(1024)
+            out.le16(isoMaxPacketSize)
             out.raw(0x01)
+            for ((alt, packetSize) in isoAdditionalAlternates) {
+                out.raw(0x09, 0x04, 0x01, alt, 0x01, 0x0E, 0x02, 0x00, 0x00)
+                out.raw(0x07, 0x05, 0x81, 0x05)
+                out.le16(packetSize)
+                out.raw(0x01)
+            }
         }
 
         val bytes = out.toByteArray()

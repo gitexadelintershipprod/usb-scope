@@ -1,5 +1,7 @@
 # USB Scope A17 security and compatibility review
 
+This document records the initial A17.1 review. The later native isochronous update is covered in [its transport review](isochronous-usb-a17.md).
+
 Review date: 2026-11-01. Upstream baseline: `45e4f4594cc3d75be164929217b10c72e69d424b`.
 Scope: inspected Android and shared Kotlin source, manifests, media storage, USB parsing, Gradle configuration,
 and the release APK. This is not a security certification or a verdict on the existing Google Play binary.

@@ -46,6 +46,8 @@ class RealUsbConnection(private val device: UsbDevice, private val connection: U
      */
     private val selectedAlt = ConcurrentHashMap<Int, Int>()
 
+    override val fileDescriptor: Int get() = if (closed) -1 else connection.fileDescriptor
+
     /**
      * Guards [inPools], [owner] and every [UsbRequest] they hold. In practice all reads for one
      * endpoint come from the single driver loop thread, but close/release run on the session thread,

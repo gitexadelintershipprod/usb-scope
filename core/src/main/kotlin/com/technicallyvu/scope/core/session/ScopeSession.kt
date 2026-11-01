@@ -50,6 +50,8 @@ data class SessionState(
     val sharpenStrength: Float = Sharpener.DEFAULT_STRENGTH,
     /** The currently-streaming driver's id, or null when no session is [ConnectionState.Streaming]. */
     val driverId: String? = null,
+    /** Retained until a valid frame arrives so automatic reconnect cannot hide a transfer error. */
+    val lastUsbError: String? = null,
 )
 
 /**
@@ -301,7 +303,7 @@ class ScopeSession(
             if (!opened) candidates.onOpenFailed(ref, e)
             val wasStreaming = _state.value.connection is ConnectionState.Streaming
             _state.update {
-                it.copy(connection = if (wasStreaming) ConnectionState.NoDevice(false) else if (driverHintCheck()) ConnectionState.NoDevice(true) else ConnectionState.Failed(e.message ?: "USB error"))
+                it.copy(connection = if (wasStreaming) ConnectionState.NoDevice(false) else if (driverHintCheck()) ConnectionState.NoDevice(true) else ConnectionState.Failed(e.message ?: "USB error"), lastUsbError = e.message ?: "USB error")
             }
         } catch (e: Exception) {
             _state.update { it.copy(connection = ConnectionState.Failed(e.message ?: e.javaClass.simpleName)) }
@@ -335,7 +337,7 @@ class ScopeSession(
     }
 
     private fun onFrame(frame: Frame, stats: StreamStats) {
-        _state.update { it.copy(stats = stats) }
+        _state.update { it.copy(stats = stats, lastUsbError = null) }
         val delivered = filter(frame.data as? FrameData.Yuyv422)?.let { filtered ->
             Frame(filtered, frame.timestampNanos, frame.buttonPressed, frame.cameraNumber, frame.sensorValue)
         } ?: frame

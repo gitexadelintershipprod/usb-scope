@@ -12,3 +12,7 @@ __pycache__/
 *.jks
 *.keystore
 keystore.properties
+
+# Android native build intermediates
+.cxx/
+.externalNativeBuild/

@@ -130,4 +130,34 @@ class UvcDescriptorsTest {
         val config = UvcTestDescriptors.build(bulk = true)
         for (length in 0..config.size) UvcDescriptors.parse(config.copyOf(length))
     }
+    @Test
+    fun `USB2 high-bandwidth ISO packet multiplier is decoded and reserved values refused`() {
+        val parsed = requireNotNull(UvcDescriptors.parse(UvcTestDescriptors.build(bulk = false, isoMaxPacketSize = 0x1400)))
+        val endpoint = parsed.streaming.single().altSettings.single { it.alt == 1 }.endpoints.single()
+        assertTrue(endpoint.isIsochronous)
+        assertTrue(endpoint.validIsochronousSize)
+        assertEquals(3072, endpoint.effectivePacketSize)
+        assertEquals(1, endpoint.interval)
+        assertFalse(UvcEndpoint(0x81, false, 0x1c00).validIsochronousSize)
+        assertFalse(UvcEndpoint(0x81, false, 0x1400, transferType = 3).isIsochronous)
+        assertFalse(UvcEndpoint(0x81, false, 0x1400, interval = 0).validIsochronousSize)
+    }
+
+    @Test
+    fun `frame descriptors preserve discrete and continuous advertised intervals`() {
+        val discrete = requireNotNull(UvcDescriptors.parse(UvcTestDescriptors.build(includeYuy2 = false)))
+            .streaming.single().formats.single().frames.single()
+        assertEquals(listOf(333_333), discrete.intervals100ns)
+        val config = UvcTestDescriptors.build(includeYuy2 = false)
+        val frameOffset = 73
+        val continuous = config.copyOfRange(frameOffset, frameOffset + 26).also { it[0] = 38; it[25] = 0 } +
+            listOf(333_333, 999_999, 333_333).flatMap { value -> (0..3).map { (value ushr (it * 8)).toByte() } }.toByteArray()
+        val replaced = config.copyOfRange(0, frameOffset) + continuous + config.copyOfRange(frameOffset + 30, config.size)
+        val frame = requireNotNull(UvcDescriptors.parse(replaced)).streaming.single().formats.single().frames.single()
+        assertTrue(frame.intervals100ns.isEmpty())
+        assertEquals(333_333, frame.minInterval100ns)
+        assertEquals(999_999, frame.maxInterval100ns)
+        assertEquals(333_333, frame.intervalStep100ns)
+    }
+
 }

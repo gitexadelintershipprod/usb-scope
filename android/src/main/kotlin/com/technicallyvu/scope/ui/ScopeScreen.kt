@@ -83,7 +83,7 @@ fun ScopeScreen(vm: ScopeViewModel, onRequestPermission: (UsbDevice) -> Unit) {
     var showUsbDiagnostics by remember { mutableStateOf(false) }
     if (showUsbDiagnostics) {
         UsbDiagnosticsDialog(
-            status = usbDiagnosticStatus(ui.session.connection),
+            status = usbDiagnosticStatus(ui.session.connection, ui.session.lastUsbError),
             onDismiss = { showUsbDiagnostics = false },
             onRequestPermission = onRequestPermission,
         )

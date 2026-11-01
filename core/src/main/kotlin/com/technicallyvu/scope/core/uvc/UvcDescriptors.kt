@@ -10,6 +10,11 @@ data class UvcFrame(
     val height: Int,
     val defaultInterval100ns: Int,
     val maxFrameBufferSize: Int,
+    /** Advertised discrete frame intervals, in 100 ns units. */
+    val intervals100ns: List<Int> = emptyList(),
+    val minInterval100ns: Int = 0,
+    val maxInterval100ns: Int = 0,
+    val intervalStep100ns: Int = 0,
 )
 
 /** One VS_FORMAT descriptor (uncompressed or MJPEG) and its frame descriptors. */
@@ -24,8 +29,20 @@ data class UvcFormat(
 data class UvcEndpoint(
     val address: Int,
     val isBulk: Boolean,
+    /** Raw wMaxPacketSize, including high-bandwidth multiplier bits for USB 2 high speed. */
     val maxPacketSize: Int,
-)
+    val transferType: Int = if (isBulk) 2 else 1,
+    val interval: Int = 1,
+) {
+    val isIsochronous: Boolean get() = transferType == 1
+
+    /** Bytes per service interval; a high-speed endpoint can transact 1, 2 or 3 times. */
+    val effectivePacketSize: Int get() = (maxPacketSize and 0x07ff) * (1 + ((maxPacketSize ushr 11) and 0x03))
+
+    val validIsochronousSize: Boolean get() = isIsochronous && interval in 1..16 &&
+        (maxPacketSize and 0xe000) == 0 && ((maxPacketSize ushr 11) and 0x03) != 3 &&
+        (maxPacketSize and 0x07ff) in 1..1024
+}
 
 /** One alternate setting of a VideoStreaming interface, and the endpoints declared under it. */
 data class UvcAltSetting(
@@ -141,7 +158,7 @@ object UvcDescriptors {
                     val isBulk = (attributes and 0x03) == 0x02
                     streamingFor(curNumber).altSettings
                         .getOrPut(curAlt) { mutableListOf() }
-                        .add(UvcEndpoint(address, isBulk, maxPacketSize))
+                        .add(UvcEndpoint(address, isBulk, maxPacketSize, attributes and 0x03, u8(i + 6)))
                 }
 
                 CS_INTERFACE -> if (bLength >= 3) {
@@ -179,8 +196,19 @@ object UvcDescriptors {
                                 val height = u16(i + 7)
                                 val maxFrameBufferSize = u32(i + 17)
                                 val defaultInterval = u32(i + 21)
+                                val intervalType = if (bLength >= 26) u8(i + 25) else -1
+                                val intervals = if (intervalType > 0) {
+                                    (0 until minOf(intervalType, (bLength - 26) / 4))
+                                        .map { u32(i + 26 + it * 4) }.filter { it > 0 }
+                                } else emptyList()
+                                val continuous = intervalType == 0 && bLength >= 38
                                 streaming.formats.lastOrNull()?.frames?.add(
-                                    UvcFrame(index, width, height, defaultInterval, maxFrameBufferSize),
+                                    UvcFrame(
+                                        index, width, height, defaultInterval, maxFrameBufferSize, intervals,
+                                        if (continuous) u32(i + 26) else 0,
+                                        if (continuous) u32(i + 30) else 0,
+                                        if (continuous) u32(i + 34) else 0,
+                                    ),
                                 )
                             }
                         }

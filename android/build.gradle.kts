@@ -10,14 +10,28 @@ android {
     namespace = "com.technicallyvu.scope"
     compileSdk = 37
     buildToolsVersion = "37.0.0"
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.gitexadelintershipprod.usbscope"
         minSdk = 29
         targetSdk = 37
-        versionCode = 5
-        versionName = "0.3.1-a17.2"
+        versionCode = 6
+        versionName = "0.3.1-a17.3"
         buildConfigField("String", "GIT_SHA", "\"${gitShortSha()}\"")
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+        }
+        externalNativeBuild {
+            cmake { arguments += "-DANDROID_STL=c++_static" }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildFeatures {

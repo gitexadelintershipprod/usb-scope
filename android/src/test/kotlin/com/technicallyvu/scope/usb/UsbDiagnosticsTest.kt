@@ -61,8 +61,11 @@ class UsbDiagnosticsTest {
         val report = formatUsbDiagnostics(snapshot(listOf(camera(interfaces = interfaces))))
         assertTrue(report.contains("Interface 1, alt 0"))
         assertTrue(report.contains("Interface 1, alt 1"))
-        assertTrue(report.contains("isochronous-only, unsupported by the current UVC bulk driver"))
+        assertTrue(report.contains("native isochronous transport unavailable on this build"))
         assertTrue(report.contains("EP 0x81: type=ISOCHRONOUS(1)"))
+        val enabled = formatUsbDiagnostics(snapshot(listOf(camera(interfaces = interfaces))).copy(isochronousSupported = true))
+        assertTrue(enabled.contains("Native isochronous transport available: true"))
+        assertTrue(enabled.contains("native isochronous transport available, format/handshake not tested"))
     }
 
     @Test

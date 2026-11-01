@@ -1,5 +1,6 @@
 package com.technicallyvu.scope.usb
 
+import com.technicallyvu.scope.core.usb.IsochronousStream
 import com.technicallyvu.scope.core.usb.UsbException
 import com.technicallyvu.scope.core.usb.UsbTransport
 
@@ -11,9 +12,30 @@ import com.technicallyvu.scope.core.usb.UsbTransport
 class AndroidUsbTransport(
     private val conn: UsbConnection,
     private val maxConsecutiveTimeouts: Int = 20,
+    private val isoOpener: ((Int, Int, Int) -> IsochronousStream)? = null,
 ) : UsbTransport {
     @Volatile var detached: Boolean = false
     private var consecutiveTimeouts = 0
+    @Volatile private var closed = false
+    private var isoStream: IsochronousStream? = null
+    private var bulkTransfersUsed = false
+
+    override val supportsIsochronous: Boolean
+        get() = !closed && conn.fileDescriptor >= 0 && (isoOpener != null || NativeIsochronous.available)
+
+    @Synchronized
+    override fun openIsochronous(endpoint: Int, packetSize: Int): IsochronousStream {
+        if (closed || detached) throw UsbException("USB camera is closed or detached")
+        if (!supportsIsochronous) throw UsbException("Native isochronous USB transport is unavailable")
+        if (isoStream != null) throw UsbException("An isochronous USB stream is already active")
+        if (bulkTransfersUsed) throw UsbException("Isochronous streaming requires a fresh USB connection")
+        // UVC uses one IN endpoint. It must be the exclusive asynchronous reaper for this fd;
+        // neither bulk UsbRequests nor another native stream may share its completion queue.
+        val opened = isoOpener?.invoke(conn.fileDescriptor, endpoint, packetSize)
+            ?: AndroidIsochronousStream(conn.fileDescriptor, endpoint, packetSize, detached = { detached })
+        isoStream = opened
+        return opened
+    }
 
     override fun claimInterface(iface: Int) {
         if (!conn.claimInterface(iface)) throw UsbException("claimInterface $iface failed")
@@ -38,7 +60,10 @@ class AndroidUsbTransport(
      * [IllegalArgumentException] for it, and it becomes a [UsbException] so the session reports it
      * instead of silently counting it as "no data yet".
      */
+    @Synchronized
     private fun transfer(endpoint: Int, buffer: ByteArray, length: Int, timeoutMs: Int): Int = try {
+        if (closed || isoStream != null) throw UsbException("Bulk transfers cannot share an active isochronous connection")
+        bulkTransfersUsed = true
         conn.bulkTransfer(endpoint, buffer, length, timeoutMs)
     } catch (e: IllegalArgumentException) {
         throw UsbException("bulk transfer %02X rejected".format(endpoint) + ": " + e.message, cause = e)
@@ -103,7 +128,16 @@ class AndroidUsbTransport(
         throw UsbException("resetDevice is not available on Android")
     }
 
-    override fun close() = conn.close()
+    @Synchronized
+    override fun close() {
+        if (closed) return
+        closed = true
+        try { isoStream?.close() }
+        finally {
+            isoStream = null
+            conn.close()
+        }
+    }
 
     private companion object {
         /** Standard descriptor type CONFIGURATION. */

@@ -274,6 +274,25 @@ class ScopeSessionTest {
     }
 
     @Test
+    fun `transfer error survives an empty reconnect poll until a valid frame arrives`(): Unit = runBlocking {
+        val sink = CountingSink()
+        val first = EndableTransport(stream(6, loop = true))
+        val devices = FakeDevices(listOf(ref)) { first }
+        val s = session(devices, sink)
+        s.start()
+        withTimeout(5_000) { while (sink.frames.get() == 0) kotlinx.coroutines.delay(5) }
+        devices.refs = emptyList()
+        first.endNow = true
+        withTimeout(5_000) { s.state.first { it.lastUsbError == "ended" } }
+        withTimeout(5_000) { s.state.first { it.connection is ConnectionState.NoDevice } }
+        assertEquals("ended", s.state.value.lastUsbError)
+        devices.opener = { stream(6, loop = true) }
+        devices.refs = listOf(ref)
+        withTimeout(5_000) { s.state.first { it.connection is ConnectionState.Streaming && it.lastUsbError == null } }
+        s.stop()
+    }
+
+    @Test
     fun `open failure reports Failed and keeps retrying`(): Unit = runBlocking {
         val attempts = AtomicInteger()
         val devices = FakeDevices(listOf(ref)) { attempts.incrementAndGet(); throw UsbException("no permission") }

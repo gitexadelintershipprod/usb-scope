@@ -8,4 +8,5 @@ ENV PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-too
 RUN yes | sdkmanager --licenses >/dev/null
 FROM tools AS sdk
 RUN sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'platform-tools'
+RUN sdkmanager 'ndk;29.0.14206865' 'cmake;3.22.1'
 WORKDIR /src

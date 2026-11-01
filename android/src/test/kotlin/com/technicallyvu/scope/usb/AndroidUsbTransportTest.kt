@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test
 class AndroidUsbTransportTest {
     private class FakeConnection : UsbConnection {
         val calls = mutableListOf<String>()
+        override var fileDescriptor: Int = -1
         var bulkResults = ArrayDeque<Int>()
         var controlReply: ByteArray? = null
         var raw: ByteArray? = null
@@ -28,6 +29,35 @@ class AndroidUsbTransportTest {
             reply.copyInto(buffer!!, 0, 0, minOf(reply.size, length)); return minOf(reply.size, length)
         }
         override fun close() { calls += "close" }
+    }
+
+    @Test
+    fun `iso stream has exclusive completion queue and closes before Android fd`() {
+        val c = FakeConnection().apply { fileDescriptor = 7 }
+        var closes = 0
+        val stream = object : com.technicallyvu.scope.core.usb.IsochronousStream {
+            override fun readPacket(buffer: ByteArray, timeoutMs: Int) = 0
+            override fun close() { if (closes++ == 0) c.calls += "iso close" }
+        }
+        val t = AndroidUsbTransport(c, isoOpener = { fd, endpoint, packetSize ->
+            assertEquals(7, fd); assertEquals(0x81, endpoint); assertEquals(3072, packetSize)
+            stream
+        })
+        org.junit.jupiter.api.Assertions.assertTrue(t.supportsIsochronous)
+        assertEquals(stream, t.openIsochronous(0x81, 3072))
+        assertThrows(UsbException::class.java) { t.bulkRead(0x81, ByteArray(16), 500) }
+        assertThrows(UsbException::class.java) { t.openIsochronous(0x81, 3072) }
+        t.close(); t.close()
+        assertEquals(listOf("iso close", "close"), c.calls)
+    }
+
+    @Test
+    fun `a connection previously used for bulk cannot hand its completion queue to iso`() {
+        val c = FakeConnection().apply { fileDescriptor = 7; bulkResults += 4 }
+        val t = AndroidUsbTransport(c, isoOpener = { _, _, _ -> error("must not open native stream") })
+        t.bulkRead(0x82, ByteArray(16), 500)
+        assertThrows(UsbException::class.java) { t.openIsochronous(0x81, 3072) }
+        t.close()
     }
 
     @Test

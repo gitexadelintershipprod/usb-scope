@@ -58,6 +58,7 @@ data class UsbDiagnosticSnapshot(
     val cameraGranted: Boolean,
     val devices: List<UsbDiagnosticDevice>,
     val enumerationError: String? = null,
+    val isochronousSupported: Boolean = false,
 )
 
 /** No USB open, control/bulk transfers, permission requests, serial reads, files or network calls. */
@@ -122,6 +123,7 @@ object UsbDiagnostics {
             cameraGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED,
             devices = descriptions,
             enumerationError = enumeration.exceptionOrNull()?.javaClass?.simpleName,
+            isochronousSupported = NativeIsochronous.available,
         )
         return UsbDiagnosticsResult(formatUsbDiagnostics(snapshot), devices)
     }
@@ -165,7 +167,7 @@ fun usbEndpointSummary(endpoint: UsbDiagnosticEndpoint): String {
         "maxPacketSize=${endpoint.maxPacketSize}, interval=${endpoint.interval}"
 }
 
-fun usbVideoTransferSummary(interfaces: List<UsbDiagnosticInterface>): String {
+fun usbVideoTransferSummary(interfaces: List<UsbDiagnosticInterface>, isochronousSupported: Boolean = false): String {
     val video = interfaces.filter { it.usbClass == 0x0e && it.subclass == 0x02 }
     val candidates = if (video.isNotEmpty()) video else interfaces
     val input = candidates.flatMap { it.endpoints }.filter { it.direction == 0x80 }
@@ -175,7 +177,8 @@ fun usbVideoTransferSummary(interfaces: List<UsbDiagnosticInterface>): String {
         video.isNotEmpty() && bulk > 0 ->
             "VideoStreaming: bulk IN=$bulk, isochronous IN=$isochronous; bulk candidate, format/handshake not tested."
         video.isNotEmpty() && isochronous > 0 ->
-            "VideoStreaming: bulk IN=0, isochronous IN=$isochronous; isochronous-only, unsupported by the current UVC bulk driver."
+            if (isochronousSupported) "VideoStreaming: bulk IN=0, isochronous IN=$isochronous; native isochronous transport available, format/handshake not tested."
+            else "VideoStreaming: bulk IN=0, isochronous IN=$isochronous; native isochronous transport unavailable on this build."
         video.isNotEmpty() -> "VideoStreaming: no bulk or isochronous IN endpoint exposed."
         interfaces.any { it.usbClass == 0x0e } -> "No standard VideoStreaming interface (class 0x0E, subclass 0x02) exposed."
         bulk > 0 -> "Non-UVC: bulk IN=$bulk; a matching vendor driver is required."
@@ -191,6 +194,7 @@ fun formatUsbDiagnostics(snapshot: UsbDiagnosticSnapshot): String = buildString 
     appendLine("Device: ${oneLine(snapshot.manufacturer)} ${oneLine(snapshot.model)}")
     appendLine("USB host feature: ${snapshot.usbHostSupported}")
     appendLine("CAMERA permission granted: ${snapshot.cameraGranted}")
+    appendLine("Native isochronous transport available: ${snapshot.isochronousSupported}")
     if (snapshot.enumerationError != null) {
         appendLine("USB enumeration: ERROR (${oneLine(snapshot.enumerationError)})")
         appendLine("Attached USB devices: unknown")
@@ -218,7 +222,7 @@ fun formatUsbDiagnostics(snapshot: UsbDiagnosticSnapshot): String = buildString 
             else -> "Attached and matched; permission gates open. Stream negotiation has not been tested."
         }
         appendLine("  Result: $result")
-        appendLine("  ${usbVideoTransferSummary(device.interfaces)}")
+        appendLine("  ${usbVideoTransferSummary(device.interfaces, snapshot.isochronousSupported)}")
         appendLine("  Interface/alternate-setting entries: ${device.interfaces.size}")
         device.interfaces.sortedWith(compareBy<UsbDiagnosticInterface> { it.number }.thenBy { it.alternateSetting })
             .forEach { iface ->

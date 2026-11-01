@@ -2,13 +2,16 @@
 
 ## Latest update — 2026-11-01
 
-[Download the Android APK with USB diagnostics](https://github.com/gitexadelintershipprod/usb-scope/releases/download/v0.3.1-a17.2/USB-Scope-A17-0.3.1-a17.2.apk)
+[Download the Android APK with isochronous camera support](https://github.com/gitexadelintershipprod/usb-scope/releases/download/v0.3.1-a17.3/USB-Scope-A17-0.3.1-a17.3.apk)
 
 This fork fixes USB video-camera permission handling on modern Android, including Android 17.
+Android now also reads **isochronous UVC cameras**, including the reported 349C:0411 connection layout,
+using the file descriptor Android authorizes. The camera needs no root or additional permissions.
+See [native transport and validation](docs/isochronous-usb-a17.md) for limits and test evidence.
 The latest Android build adds **USB diagnostics** on the no-picture and About screens: inspect every attached
 USB device, allow access to your camera, and copy the local report when the camera does not connect.
 Unsupported-camera reasons now remain visible until detach instead of turning into a misleading "No device".
-Diagnostics identifies missing permissions and unsupported USB transports; it does not add isochronous streaming.
+Diagnostics identifies missing permissions and shows whether the native isochronous transport is available.
 Android requires Camera permission for video-class USB devices: allow **Camera**, then **USB access**.
 Vendor-class endoscopes still need only the per-device USB approval. Denied permissions remain retryable.
 Malformed USB descriptors and oversized frames are rejected to reduce crash and memory-exhaustion risks.
@@ -19,7 +22,7 @@ installed alongside the Play version. It uses an independent signing certificate
 location, contacts or storage permission is requested. Original source: [TechnicallyVu](https://github.com/technicallyvu/usb-scope).
 
 A successful build does not establish live USB compatibility: the user's Android 17 phone and camera
-must still be tested. Generic UVC cameras with isochronous endpoints remain unsupported by the original driver.
+must still be tested. Isochronous support is implemented for Android; the desktop transport remains bulk-only.
 
 ## Upstream project
 
@@ -50,7 +53,7 @@ jmz3/EndoscopeCamera, NinesLastGoal/supercamera_WIN10.
 |---|---|---|---|
 | `i4season-yuv` | 2CE3:3828, 0329:2022 | one interface FF/F0/01 | 320x240 YUYV, ~11 fps (verified on hardware) |
 | `useeplus` | 2CE3:3828, 0329:2022 | interfaces FF/F0/00 + FF/F0/01 | 640x480 MJPEG (from public docs; untested here) |
-| `uvc-bulk` | any | USB Video Class, bulk streaming endpoint | MJPEG or YUY2 at the camera's default frame (unit-tested only; no UVC hardware yet; isochronous cameras are refused with a message) |
+| `uvc-bulk` (historical id) | any UVC | bulk; native isochronous on Android | MJPEG or YUY2; advertised preview size/interval chosen for ISO. Unit/native tests passed; physical 349C:0411 validation pending. |
 
 ## Status
 Phase 1 (Windows dev bench) accepted 2026-09-09 against an i4season "su4p-002" (2CE3:3828, firmware 5.0.13).

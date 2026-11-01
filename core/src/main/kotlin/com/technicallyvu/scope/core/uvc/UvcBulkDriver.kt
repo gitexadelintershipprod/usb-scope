@@ -5,41 +5,46 @@ import com.technicallyvu.scope.core.driver.Frame
 import com.technicallyvu.scope.core.driver.FrameSource
 import com.technicallyvu.scope.core.driver.PacketSink
 import com.technicallyvu.scope.core.driver.StreamStats
+import com.technicallyvu.scope.core.usb.IsochronousStream
 import com.technicallyvu.scope.core.usb.UsbDeviceInfo
 import com.technicallyvu.scope.core.usb.UsbException
 import com.technicallyvu.scope.core.usb.UsbTransport
 import com.technicallyvu.scope.core.useeplus.FpsMeter
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * A configuration this driver understands the shape of but cannot drive (isochronous-only endpoints,
+ * A configuration this driver understands the shape of but cannot drive on this backend (unsupported endpoints,
  * no MJPEG/YUY2 format, not a UVC device at all). Permanent, so [UvcBulkDriver.open] does not retry
  * it: the answer would be identical three times over, and the user would wait 4.5 s for it.
  */
 class UvcUnsupportedException(message: String) : UsbException(message)
 
 /**
- * Generic USB Video Class driver for cameras that stream over a **bulk** endpoint.
+ * Generic USB Video Class driver for bulk or supported native isochronous IN streaming.
  *
- * Vendor-neutral: it matches on the standard interface classes rather than a USB id, so it is the
- * fallback for any UVC camera the vendor-specific drivers do not claim (it is last in
- * [com.technicallyvu.scope.core.driver.DriverRegistry]). Isochronous cameras -- the majority of
- * webcams -- are refused with an explanation rather than a mystery failure, because isochronous
- * transfers need a packet-scheduling API neither backend exposes yet.
+ * Vendor-neutral: it matches standard interface classes and remains the fallback after vendor
+ * drivers. The historical id is retained for saved settings. Platforms without queued ISO support
+ * continue to refuse ISO-only devices with an explicit message.
  */
 class UvcBulkDriver(
     private val clock: () -> Long = System::nanoTime,
     private val sleep: (millis: Long) -> Unit = Thread::sleep,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val packetSink: PacketSink? = null,
+    private val streamTimeoutMs: Long = 10_000,
 ) : DeviceDriver {
 
     override val id = "uvc-bulk"
@@ -57,7 +62,7 @@ class UvcBulkDriver(
         info.interfaces.any { it.usbClass == UVC_CLASS && it.subclass == VC_SUBCLASS }
 
     override fun withPacketSink(sink: PacketSink): DeviceDriver =
-        UvcBulkDriver(clock, sleep, ioDispatcher, sink)
+        UvcBulkDriver(clock, sleep, ioDispatcher, sink, streamTimeoutMs)
 
     override fun open(transport: UsbTransport): FrameSource {
         var lastError: UsbException? = null
@@ -65,14 +70,17 @@ class UvcBulkDriver(
             val claimed = mutableListOf<Int>()
             try {
                 val setup = handshake(transport, claimed)
-                return UvcFrameSource(transport, setup, clock, ioDispatcher, packetSink)
+                val iso = if (setup.isIsochronous) transport.openIsochronous(setup.endpoint, setup.packetSize) else null
+                return UvcFrameSource(transport, setup, clock, ioDispatcher, packetSink, iso, streamTimeoutMs)
             } catch (e: UvcUnsupportedException) {
                 // Permanent: retrying cannot change the descriptors. Hand back anything the
                 // half-finished handshake claimed, or the device stays locked to a dead session.
+                if (claimed.size > 1) runCatching { transport.setAltSetting(claimed.last(), 0) }
                 claimed.asReversed().forEach { runCatching { transport.releaseInterface(it) } }
                 throw e
             } catch (e: UsbException) {
                 lastError = e
+                if (claimed.size > 1) runCatching { transport.setAltSetting(claimed.last(), 0) }
                 // Best effort: a half-finished handshake may hold one or both interfaces, and the
                 // next attempt's claim would then fail for a reason of our own making.
                 claimed.asReversed().forEach { runCatching { transport.releaseInterface(it) } }
@@ -82,7 +90,7 @@ class UvcBulkDriver(
                 if (attempt < OPEN_ATTEMPTS) sleep(RETRY_WAIT_MS)
             }
         }
-        throw UsbException("UVC handshake failed after $OPEN_ATTEMPTS attempts", cause = lastError)
+        throw UsbException("UVC handshake failed after $OPEN_ATTEMPTS attempts: ${lastError?.message ?: "USB error"}", cause = lastError)
     }
 
     /** Everything [UvcFrameSource] needs, resolved from the descriptors and the probe/commit exchange. */
@@ -97,6 +105,8 @@ class UvcBulkDriver(
         val maxPayloadSize: Int,
         /** Negotiated `dwMaxVideoFrameSize`, else the frame descriptor's; 0 when neither declares one. */
         val maxFrameBufferSize: Int,
+        val isIsochronous: Boolean = false,
+        val packetSize: Int = 0,
     )
 
     /**
@@ -110,25 +120,31 @@ class UvcBulkDriver(
         val vs = device.streaming.firstOrNull()
             ?: throw UvcUnsupportedException("this camera declares no video streaming interface")
 
-        // Prefer alt 0: on a bulk camera the endpoint lives there and no alt switch is really needed.
-        val (alt, endpoint) = vs.altSettings
-            .sortedBy { it.alt }
-            .firstNotNullOfOrNull { setting ->
-                setting.endpoints
-                    .firstOrNull { it.isBulk && (it.address and 0x80) != 0 }
-                    ?.let { setting.alt to it.address }
-            }
-            ?: throw UvcUnsupportedException(
-                "This camera has no bulk streaming endpoint (it streams over isochronous transfers, " +
-                    "which are not supported yet)",
-            )
+        // A bulk-capable camera keeps the existing portable path. ISO is selected only when
+        // necessary and only if the platform can preserve individual packet completions.
+        val inputEndpoints = vs.altSettings.sortedBy { it.alt }.flatMap { setting ->
+            setting.endpoints.filter {
+                (it.address and 0x80) != 0 && (vs.inputEndpoint == 0 || it.address == vs.inputEndpoint)
+            }.map { setting.alt to it }
+        }
+        val bulk = inputEndpoints.firstOrNull { it.second.isBulk }
+        val isoChoices = inputEndpoints.filter { it.second.validIsochronousSize }
+        val isIsochronous = bulk == null
+        if (isIsochronous && isoChoices.isEmpty()) {
+            throw UvcUnsupportedException("This camera has no supported bulk or isochronous IN streaming endpoint")
+        }
+        if (isIsochronous && !t.supportsIsochronous) {
+            throw UvcUnsupportedException("This camera needs isochronous USB transfers, unavailable on this platform")
+        }
 
         val format = vs.formats.firstOrNull { it.kind == UvcFormatKind.MJPEG }
             ?: vs.formats.firstOrNull { it.kind == UvcFormatKind.YUY2 }
             ?: throw UvcUnsupportedException("this camera offers no MJPEG/YUY2 format")
-        val frame = format.frames.firstOrNull { it.index == format.defaultFrameIndex }
+        val defaultFrame = format.frames.firstOrNull { it.index == format.defaultFrameIndex }
             ?: format.frames.firstOrNull()
             ?: throw UvcUnsupportedException("this camera's format declares no frame sizes")
+        val (frame, frameInterval) = if (isIsochronous) selectIsoFrame(format, isoChoices.map { it.second })
+            else defaultFrame to defaultFrame.defaultInterval100ns
 
         // Validate before starting a stream: YUYV filters run before Android's bitmap converter,
         // so rejecting huge dimensions only in the renderer is too late to bound allocations.
@@ -146,6 +162,7 @@ class UvcBulkDriver(
         t.claimInterface(device.controlInterface)
         claimed += vs.number
         t.claimInterface(vs.number)
+        if (isIsochronous) t.setAltSetting(vs.number, 0)
 
         val negotiated = UvcProbe.negotiate(
             t,
@@ -154,22 +171,35 @@ class UvcBulkDriver(
             request = UvcProbeControl(
                 formatIndex = format.index,
                 frameIndex = frame.index,
-                frameInterval100ns = frame.defaultInterval100ns,
+                frameInterval100ns = frameInterval,
                 maxVideoFrameSize = frame.maxFrameBufferSize,
                 // 0 = "no preference": the device fills in what it can actually sustain.
                 maxPayloadTransferSize = 0,
             ),
         )
 
-        // Always issued, alt 0 included: a camera that was left in another alt setting by a previous
-        // session (or another app) will not start streaming until it is put back.
+        // Choose the smallest alternate that can carry the payload the camera committed to.
+        // If firmware declares zero, reserve the largest valid advertised alternate instead.
+        val selected = bulk ?: isoChoices
+            .sortedWith(compareBy<Pair<Int, UvcEndpoint>> { it.second.effectivePacketSize }.thenBy { it.first })
+            .let { choices ->
+                val wanted = negotiated.maxPayloadTransferSize
+                if (wanted > 0) choices.firstOrNull { it.second.effectivePacketSize >= wanted }
+                    ?: throw UvcUnsupportedException(
+                        "Camera requires $wanted bytes per isochronous interval; available maximum is " +
+                            choices.maxOf { it.second.effectivePacketSize },
+                    )
+                else choices.last()
+            }
+        val (alt, endpoint) = selected
+        // Always issued, including bulk alt 0, so previous sessions cannot leave a stale alternate.
         t.setAltSetting(vs.number, alt)
 
         return Setup(
             controlInterface = device.controlInterface,
             streamingInterface = vs.number,
             altSetting = alt,
-            endpoint = endpoint,
+            endpoint = endpoint.address,
             kind = format.kind,
             width = frame.width,
             height = frame.height,
@@ -177,7 +207,45 @@ class UvcBulkDriver(
             // What the device committed to, else what the frame descriptor declared; the parser
             // turns this into the ceiling that stops a wedged stream from eating the heap.
             maxFrameBufferSize = negotiated.maxVideoFrameSize.takeIf { it > 0 } ?: frame.maxFrameBufferSize,
+            isIsochronous = isIsochronous,
+            packetSize = if (isIsochronous) endpoint.effectivePacketSize else 0,
         )
+    }
+
+    /** Prefer an advertised VGA-or-smaller preview; never invent dimensions or frame intervals. */
+    internal fun selectIsoFrame(format: UvcFormat, endpoints: List<UvcEndpoint>): Pair<UvcFrame, Int> {
+        val valid = format.frames.filter {
+            it.width in 1..MAX_FRAME_DIMENSION && it.height in 1..MAX_FRAME_DIMENSION &&
+                it.width.toLong() * it.height <= MAX_FRAME_PIXELS && it.defaultInterval100ns > 0
+        }
+        if (valid.isEmpty()) throw UvcUnsupportedException("This camera declares no safe preview frame size")
+        val preview = valid.filter { it.width <= 640 && it.height <= 480 }
+        val ordered = if (preview.isNotEmpty()) preview.sortedByDescending { it.width.toLong() * it.height }
+            else valid.sortedBy { it.width.toLong() * it.height }
+        for (candidate in ordered) {
+            if (format.kind != UvcFormatKind.YUY2) return candidate to candidate.defaultInterval100ns
+            // USB2 high-bandwidth or 1024-byte service packets identify high speed. Otherwise use
+            // the conservative full-speed budget; this does not assume a fast phone means fast USB.
+            val bytesPerSecond = endpoints.maxOf { endpoint ->
+                val highSpeed = endpoint.maxPacketSize > 1023
+                val intervalsPerSecond = if (highSpeed) 8000L else 1000L
+                val divisor = 1L shl (endpoint.interval.coerceIn(1, 16) - 1)
+                (endpoint.effectivePacketSize - 12).coerceAtLeast(1).toLong() * intervalsPerSecond / divisor
+            }
+            val frameBytes = candidate.width.toLong() * candidate.height * 2
+            val required = (frameBytes * 10_000_000 + bytesPerSecond - 1) / bytesPerSecond.coerceAtLeast(1)
+            val intervals = (candidate.intervals100ns + candidate.defaultInterval100ns).filter { it > 0 }.distinct().sorted()
+            intervals.firstOrNull { it.toLong() >= maxOf(required, candidate.defaultInterval100ns.toLong()) }
+                ?.let { return candidate to it }
+            if (candidate.minInterval100ns > 0 && candidate.maxInterval100ns >= candidate.minInterval100ns) {
+                val step = candidate.intervalStep100ns.coerceAtLeast(1).toLong()
+                val minimum = candidate.minInterval100ns.toLong()
+                val wanted = maxOf(required, candidate.defaultInterval100ns.toLong(), minimum)
+                val rounded = minimum + ((wanted - minimum + step - 1) / step) * step
+                if (rounded <= candidate.maxInterval100ns) return candidate to rounded.toInt()
+            }
+        }
+        throw UvcUnsupportedException("No advertised YUY2 preview interval fits this camera's isochronous bandwidth")
     }
 
     companion object {
@@ -202,6 +270,8 @@ class UvcFrameSource internal constructor(
     private val clock: () -> Long,
     private val dispatcher: CoroutineDispatcher,
     private val packetSink: PacketSink?,
+    private val isoStream: IsochronousStream? = null,
+    private val streamTimeoutMs: Long = 10_000,
 ) : FrameSource {
     private val _stats = MutableStateFlow(StreamStats())
     override val stats: StateFlow<StreamStats> = _stats
@@ -217,7 +287,7 @@ class UvcFrameSource internal constructor(
 
     // As in the other drivers, the blocking read is offloaded per-call with withContext rather than
     // flowOn: flowOn's buffer would let this loop race ahead of a downstream take(n)'s cancellation.
-    override val frames: Flow<Frame> = flow {
+    private val bulkFrames: Flow<Frame> = flow {
         val parser = UvcPayloadParser(
             setup.kind,
             setup.width,
@@ -271,10 +341,68 @@ class UvcFrameSource internal constructor(
         }
     }
 
+    private val isoFrames: Flow<Frame> = flow {
+        val reader = requireNotNull(isoStream)
+        val parser = UvcPayloadParser(setup.kind, setup.width, setup.height, setup.maxPayloadSize, setup.maxFrameBufferSize)
+        val fps = FpsMeter()
+        val packet = ByteArray(setup.packetSize)
+        var lastFps = 0.0
+        val timeoutNanos = streamTimeoutMs.coerceAtLeast(1) * 1_000_000L
+        var lastPacketAt = System.nanoTime()
+        var lastFrameAt = lastPacketAt
+        var lastStatsAt = lastPacketAt
+        while (!closed) {
+            currentCoroutineContext().ensureActive()
+            val n = ioLock.withLock {
+                if (closed) 0 else reader.readPacket(packet, UvcBulkDriver.READ_TIMEOUT_MS)
+            }
+            val now = clock()
+            val monotonic = System.nanoTime()
+            if (n > 0) {
+                lastPacketAt = monotonic
+                packetSink?.onPacket(packet, n, now)
+            }
+            val completed = parser.acceptIsochronousPacket(packet, n, now)
+            for (frame in completed) {
+                lastFrameAt = monotonic
+                lastFps = fps.tick(now)
+                _stats.value = StreamStats(
+                    fps = lastFps, framesEmitted = parser.framesEmitted, framesDropped = parser.framesDropped,
+                    bytesReceived = parser.bytesReceived, headerErrors = parser.badHeaders,
+                )
+                lastStatsAt = monotonic
+                emit(frame)
+            }
+            // A high-speed ISO endpoint can complete 8000 packets/s. Publish per frame or four
+            // times/s during a damaged/stalled stream instead of allocating UI stats per packet.
+            if (monotonic - lastStatsAt >= 250_000_000L) {
+                _stats.value = StreamStats(
+                    fps = lastFps, framesEmitted = parser.framesEmitted, framesDropped = parser.framesDropped,
+                    bytesReceived = parser.bytesReceived, headerErrors = parser.badHeaders,
+                )
+                lastStatsAt = monotonic
+            }
+            if (monotonic - lastPacketAt >= timeoutNanos) {
+                throw UsbException("No successful isochronous USB packets for ${streamTimeoutMs}ms; reconnect the camera")
+            }
+            if (monotonic - lastFrameAt >= timeoutNanos) {
+                throw UsbException("No complete UVC ${setup.kind} ${setup.width}x${setup.height} frame for ${streamTimeoutMs}ms: " +
+                    "packetSize=${setup.packetSize}, bytes=${parser.bytesReceived}, " +
+                    "badHeaders=${parser.badHeaders}, dropped=${parser.framesDropped}")
+            }
+        }
+    }.flowOn(dispatcher).buffer(1, BufferOverflow.DROP_OLDEST)
+
+    // ISO reads must continue while display/filtering handles the previous frame. UVC carries no
+    // cable-button side channel, so replacing an old frame is safe. Keep bulk's replay-exact flow.
+    override val frames: Flow<Frame> = if (isoStream == null) bulkFrames else isoFrames
+
     /** Non-suspending. Blocks only for as long as an in-flight read needs to return (READ_TIMEOUT_MS). */
     override fun close() {
         closed = true
         ioLock.withLock {
+            // Every native ISO URB must be cancelled/reaped before changing alternates or freeing fd.
+            runCatching { isoStream?.close() }
             // Parking the streaming interface at alt 0 tells the device to stop sending.
             runCatching { transport.setAltSetting(setup.streamingInterface, 0) }
             runCatching { transport.releaseInterface(setup.streamingInterface) }

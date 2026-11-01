@@ -2,6 +2,8 @@ package com.technicallyvu.scope.usb
 
 /** The slice of android.hardware.usb.UsbDeviceConnection the transport uses, kept as an interface so it can be faked in JVM tests. */
 interface UsbConnection : AutoCloseable {
+    /** Android-granted file descriptor; -1 on transports that cannot expose native USB I/O. */
+    val fileDescriptor: Int get() = -1
     fun claimInterface(number: Int): Boolean
     fun releaseInterface(number: Int): Boolean
     fun setInterface(number: Int, alt: Int): Boolean

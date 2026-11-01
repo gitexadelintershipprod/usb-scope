@@ -9,7 +9,7 @@ docker run --rm -v usb-scope-gradle-cache:/cache usb-scope-android-build chown 1
 docker run --rm --user 1000:1000 -e HOME=/tmp -e ANDROID_USER_HOME=/tmp/.android -e JAVA_TOOL_OPTIONS=-Duser.home=/tmp -v "$PWD:/src" -v usb-scope-gradle-cache:/cache usb-scope-android-build ./gradlew --no-daemon --max-workers=6 :core:test :android:testDebugUnitTest :android:lintRelease :android:assembleRelease
 ```
 
-Use your own UID/GID instead of 1000 if necessary. The image provides JDK 17, SDK platform 37.0 and Build Tools 37.
+Use your own UID/GID instead of 1000 if necessary. The image provides JDK 17, SDK platform 37.0, Build Tools 37, NDK 29.0.14206865 and CMake 3.22.1. Native USB code is built from source for arm64-v8a, armeabi-v7a, x86 and x86_64 with 16 KiB ELF alignment.
 The build uses compile/target API 37, min API 29. Release output is unsigned unless an external signing-properties
 file is explicitly supplied. Sign it with your own private Android keystore using Build Tools `zipalign` and
 `apksigner`; never commit a keystore or password. The delivered APK uses an independent RSA signing key retained

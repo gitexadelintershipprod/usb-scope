@@ -4,6 +4,7 @@ import com.technicallyvu.scope.core.TestPackets
 import com.technicallyvu.scope.core.driver.Frame
 import com.technicallyvu.scope.core.driver.FrameData
 import com.technicallyvu.scope.core.jpegBytes
+import com.technicallyvu.scope.core.usb.ISO_PACKET_ERROR
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -234,6 +235,65 @@ class UvcPayloadParserTest {
         val good = TestPackets.fakeJpeg(40)
         assertArrayEquals(good, p.feed(payload(FID0 or EOF, good)).single().jpegBytes())
         assertEquals(12L + good.size, p.bytesReceived)
+    }
+
+    @Test
+    fun `full-capacity ISO packets have independent headers and EOF ends the packet immediately`() {
+        val parser = UvcPayloadParser(UvcFormatKind.YUY2, 3, 2, 3072)
+        val pixels = ByteArray(12) { (it + 10).toByte() }
+        val first = payload(FID0, pixels.copyOfRange(0, 6), hdrLen = 2)
+        val last = payload(FID0 or EOF, pixels.copyOfRange(6, 12), hdrLen = 2)
+        assertEquals(8, first.size)
+        assertTrue(parser.acceptIsochronousPacket(first, 8, 1L).isEmpty())
+        val frame = parser.acceptIsochronousPacket(last, 8, 2L).single()
+        assertArrayEquals(pixels, (frame.data as FrameData.Yuyv422).bytes)
+        assertEquals(1, parser.framesEmitted)
+        assertEquals(0, parser.framesDropped)
+    }
+
+    @Test
+    fun `failed ISO packet drops even a syntactically complete JPEG and next FID recovers`() {
+        val parser = mjpeg()
+        val jpeg = TestPackets.fakeJpeg(40)
+        val first = payload(FID0, jpeg.copyOfRange(0, 20), hdrLen = 2)
+        val last = payload(FID0 or EOF, jpeg.copyOfRange(20, jpeg.size), hdrLen = 2)
+        parser.acceptIsochronousPacket(first, first.size, 1L)
+        parser.acceptIsochronousPacket(ByteArray(0), ISO_PACKET_ERROR, 2L)
+        assertTrue(parser.acceptIsochronousPacket(last, last.size, 3L).isEmpty())
+        assertEquals(1, parser.framesDropped)
+        val next = payload(FID1 or EOF, jpeg, hdrLen = 2)
+        assertArrayEquals(jpeg, parser.acceptIsochronousPacket(next, next.size, 4L).single().jpegBytes())
+    }
+
+    @Test
+    fun `ISO zero packets do not end a frame and FID recovers a missing EOF`() {
+        val parser = mjpeg()
+        val jpeg = TestPackets.fakeJpeg(40)
+        val first = payload(FID0, jpeg, hdrLen = 2)
+        assertTrue(parser.acceptIsochronousPacket(first, first.size, 1L).isEmpty())
+        repeat(32) { assertTrue(parser.acceptIsochronousPacket(ByteArray(0), 0, 2L).isEmpty()) }
+        assertEquals(jpeg.size, parser.bufferedBytes)
+        val next = payload(FID1 or EOF, jpeg, hdrLen = 2)
+        val frames = parser.acceptIsochronousPacket(next, next.size, 3L)
+        assertEquals(2, frames.size)
+        frames.forEach { assertArrayEquals(jpeg, it.jpegBytes()) }
+    }
+
+    @Test
+    fun `ISO malformed packet and device ERR bit damage only the current frame`() {
+        val parser = mjpeg()
+        val jpeg = TestPackets.fakeJpeg(40)
+        val first = payload(FID0, jpeg.copyOfRange(0, 20), hdrLen = 2)
+        parser.acceptIsochronousPacket(first, first.size, 1L)
+        parser.acceptIsochronousPacket(byteArrayOf(1), 1, 2L)
+        val last = payload(FID0 or EOF, jpeg.copyOfRange(20, jpeg.size), hdrLen = 2)
+        assertTrue(parser.acceptIsochronousPacket(last, last.size, 3L).isEmpty())
+        val error = payload(FID1 or ERR or EOF, jpeg, hdrLen = 2)
+        assertTrue(parser.acceptIsochronousPacket(error, error.size, 4L).isEmpty())
+        val good = payload(FID0 or EOF, jpeg, hdrLen = 2)
+        assertEquals(1, parser.acceptIsochronousPacket(good, good.size, 5L).size)
+        assertEquals(2, parser.framesDropped)
+        assertEquals(1, parser.badHeaders)
     }
 
     private companion object {

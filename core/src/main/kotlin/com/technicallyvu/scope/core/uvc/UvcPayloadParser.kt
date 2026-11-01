@@ -2,11 +2,12 @@ package com.technicallyvu.scope.core.uvc
 
 import com.technicallyvu.scope.core.driver.Frame
 import com.technicallyvu.scope.core.driver.FrameData
+import com.technicallyvu.scope.core.usb.ISO_PACKET_ERROR
 import com.technicallyvu.scope.core.useeplus.FrameReassembler
 import java.io.ByteArrayOutputStream
 
 /**
- * Turns a UVC bulk-transport byte stream into frames.
+ * Turns UVC bulk transfers or individual isochronous packets into frames.
  *
  * The stream is a sequence of *payload transfers*, each `bHeaderLength` header bytes (byte 0) plus
  * data, and each no longer than the negotiated `dwMaxPayloadTransferSize` ([maxPayloadSize]). A
@@ -111,6 +112,33 @@ class UvcPayloadParser(
             return out
         }
 
+        if (!startPayload(chunk, n, nowNanos, out)) return out
+
+        remainingInPayload = maxPayloadSize - n
+        if (n < chunkCapacity || remainingInPayload <= 0) endPayload(nowNanos, out)
+        return out
+    }
+
+    /**
+     * One complete service-interval packet, preserving its USB boundary. Each packet starts with
+     * its own UVC payload header even when it fills the endpoint capacity; bulk continuation
+     * heuristics must never concatenate that header into image data. A failed packet damages the
+     * current frame until EOF or the next frame id; a timeout/empty packet changes no framing.
+     */
+    fun acceptIsochronousPacket(chunk: ByteArray, n: Int, nowNanos: Long): List<Frame> {
+        if (n == ISO_PACKET_ERROR) {
+            frameErrored = true
+            return emptyList()
+        }
+        if (n <= 0) return emptyList()
+        require(n <= chunk.size) { "isochronous packet is larger than its buffer" }
+        bytesReceived += n
+        val out = mutableListOf<Frame>()
+        if (startPayload(chunk, n, nowNanos, out)) endPayload(nowNanos, out)
+        return out
+    }
+
+    private fun startPayload(chunk: ByteArray, n: Int, nowNanos: Long, out: MutableList<Frame>): Boolean {
         val headerLength = chunk[0].toInt() and 0xFF
         if (headerLength < 2 || headerLength > n) {
             // Not a payload header. Drop this transfer and wait for the next one to resynchronise.
@@ -119,20 +147,20 @@ class UvcPayloadParser(
             badHeaders++
             if (frameBuf.size() > 0 || frameDiscarded) frameErrored = true
             remainingInPayload = 0
-            return out
+            return false
         }
 
         val flags = chunk[1].toInt() and 0xFF
         val fid = flags and FID
-        if (fid != currentFid && (frameBuf.size() > 0 || frameDiscarded)) finish(nowNanos, out)
+        if (currentFid >= 0 && fid != currentFid &&
+            (frameBuf.size() > 0 || frameDiscarded || frameErrored)
+        ) finish(nowNanos, out)
         currentFid = fid
         if (flags and ERR != 0) frameErrored = true
         if (headerLength < n) appendData(chunk, headerLength, n - headerLength)
         eofPending = flags and EOF != 0
 
-        remainingInPayload = maxPayloadSize - n
-        if (n < chunkCapacity || remainingInPayload <= 0) endPayload(nowNanos, out)
-        return out
+        return true
     }
 
     /**

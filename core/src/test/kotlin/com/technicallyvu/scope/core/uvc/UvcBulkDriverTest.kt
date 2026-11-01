@@ -6,11 +6,14 @@ import com.technicallyvu.scope.core.driver.PacketSink
 import com.technicallyvu.scope.core.fixture.LoggedPacket
 import com.technicallyvu.scope.core.fixture.ReplayTransport
 import com.technicallyvu.scope.core.jpegBytes
+import com.technicallyvu.scope.core.usb.IsochronousStream
 import com.technicallyvu.scope.core.usb.UsbDeviceInfo
 import com.technicallyvu.scope.core.usb.UsbException
 import com.technicallyvu.scope.core.usb.UsbInterfaceInfo
 import com.technicallyvu.scope.core.usb.UsbTransport
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
@@ -220,4 +223,117 @@ class UvcBulkDriverTest {
         driver().open(t).close()
         assertEquals(listOf("alt 1 0", "release 1", "release 0", "close"), t.calls.takeLast(4))
     }
+    private class IsoTransport(
+        val inner: ReplayTransport,
+        private val packets: List<ByteArray> = emptyList(),
+    ) : UsbTransport by inner {
+        override val supportsIsochronous = true
+        var requestedEndpoint = 0
+        var requestedPacketSize = 0
+        var closedIso = false
+        private var cursor = 0
+        override fun openIsochronous(endpoint: Int, packetSize: Int): IsochronousStream {
+            requestedEndpoint = endpoint
+            requestedPacketSize = packetSize
+            inner.calls += "iso open"
+            return object : IsochronousStream {
+                override fun readPacket(buffer: ByteArray, timeoutMs: Int): Int {
+                    if (cursor >= packets.size) { Thread.sleep(1); return 0 }
+                    val bytes = packets[cursor++]
+                    check(bytes.size <= buffer.size)
+                    bytes.copyInto(buffer)
+                    return bytes.size
+                }
+                override fun close() { closedIso = true; inner.calls += "iso close" }
+            }
+        }
+    }
+
+    @Test
+    fun `native ISO uses high-bandwidth packet capacity and closes before releasing interfaces`() {
+        val jpeg = TestPackets.fakeJpeg(100)
+        val packet = byteArrayOf(2, 2) + jpeg
+        val base = transport(bulk = false, maxPayload = 3072).apply {
+            controlResponses[0x80 to 0x06] = UvcTestDescriptors.build(bulk = false, isoMaxPacketSize = 0x1400)
+        }
+        val t = IsoTransport(base, listOf(packet))
+        val source = driver().open(t)
+        try {
+            val frame = runBlocking { withTimeout(3_000) { source.frames.first() } }
+            assertArrayEquals(jpeg, frame.jpegBytes())
+            assertEquals(0x81, t.requestedEndpoint)
+            assertEquals(3072, t.requestedPacketSize)
+            assertTrue(base.calls.indexOf("alt 1 0") < base.calls.indexOf("ctrl 21 01 0100 0001 34"))
+            assertTrue(base.calls.indexOf("alt 1 1") < base.calls.indexOf("iso open"))
+        } finally { source.close() }
+        assertTrue(t.closedIso)
+        assertEquals(listOf("iso close", "alt 1 0", "release 1", "release 0", "close"), base.calls.takeLast(5))
+    }
+
+    @Test
+    fun `ISO selects the smallest alternate that carries the committed payload`() {
+        val base = transport(bulk = false, maxPayload = 1400).apply {
+            controlResponses[0x80 to 0x06] = UvcTestDescriptors.build(
+                bulk = false, isoMaxPacketSize = 1024,
+                isoAdditionalAlternates = listOf(2 to 0x0c00, 3 to 0x1400),
+            )
+        }
+        val setup = driver().handshake(IsoTransport(base))
+        assertTrue(setup.isIsochronous)
+        assertEquals(2, setup.altSetting)
+        assertEquals(2048, setup.packetSize)
+    }
+
+    @Test
+    fun `ISO refuses payload requirements greater than every advertised alternate`() {
+        val base = transport(bulk = false, maxPayload = 4096).apply {
+            controlResponses[0x80 to 0x06] = UvcTestDescriptors.build(bulk = false, isoMaxPacketSize = 0x1400)
+        }
+        val error = assertThrows(UvcUnsupportedException::class.java) { driver().open(IsoTransport(base)) }
+        assertTrue(error.message!!.contains("4096"))
+        assertTrue(slept.isEmpty())
+        assertEquals(listOf("release 1", "release 0"), base.calls.filter { it.startsWith("release") })
+    }
+
+    @Test
+    fun `ISO chooses an advertised VGA preview instead of a default HD frame`() {
+        val base = transport(bulk = false, maxPayload = 3072).apply {
+            controlResponses[0x80 to 0x06] = UvcTestDescriptors.build(
+                bulk = false, isoMaxPacketSize = 0x1400, mjpegWidth = 1920, mjpegHeight = 1080,
+                additionalMjpegFrames = listOf(640 to 480),
+            )
+            controlResponses[0xA1 to 0x81] = UvcProbe.encode(UvcProbeControl(1, 2, 333_333, 614_400, 3072), 34)
+        }
+        val setup = driver().handshake(IsoTransport(base))
+        assertEquals(640, setup.width)
+        assertEquals(480, setup.height)
+    }
+
+    @Test
+    fun `YUY2 ISO chooses a slower advertised discrete or continuous interval when bandwidth requires it`() {
+        val endpoint = UvcEndpoint(0x81, false, 0x1400)
+        for (frame in listOf(
+            UvcFrame(1, 1024, 768, 333_333, 1_572_864, listOf(333_333, 666_666)),
+            UvcFrame(1, 1024, 768, 333_333, 1_572_864, minInterval100ns = 333_333,
+                maxInterval100ns = 999_999, intervalStep100ns = 333_333),
+        )) {
+            val selected = driver().selectIsoFrame(UvcFormat(1, UvcFormatKind.YUY2, 1, listOf(frame)), listOf(endpoint))
+            assertEquals(frame, selected.first)
+            assertEquals(666_666, selected.second)
+        }
+    }
+
+    @Test
+    fun `ISO stalls produce an actionable error instead of waiting forever`() {
+        val t = IsoTransport(transport(bulk = false, maxPayload = 1024))
+        val source = UvcBulkDriver(ioDispatcher = Dispatchers.Default, streamTimeoutMs = 20).open(t)
+        try {
+            val error = assertThrows(UsbException::class.java) {
+                runBlocking { withTimeout(3_000) { source.frames.toList() } }
+            }
+            assertTrue(error.message!!.contains("No successful isochronous USB packets"))
+        } finally { source.close() }
+        assertTrue(t.closedIso)
+    }
+
 }
