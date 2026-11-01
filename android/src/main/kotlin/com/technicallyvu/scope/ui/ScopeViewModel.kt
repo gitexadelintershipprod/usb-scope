@@ -38,6 +38,7 @@ import com.technicallyvu.scope.settings.DriverDefault
 import com.technicallyvu.scope.settings.SessionSettingsTarget
 import com.technicallyvu.scope.settings.Settings
 import com.technicallyvu.scope.settings.SettingsApplier
+import com.technicallyvu.scope.usb.UsbEventTrace
 import com.technicallyvu.scope.usb.AndroidDeviceSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -361,6 +362,7 @@ class ScopeViewModel(app: Application, private val appSettings: AppSettings) : A
         newSession.start()
         stateJob = viewModelScope.launch {
             newSession.state.collect { s ->
+                if (!replaying) UsbEventTrace.recordState("viewer", usbDiagnosticStatus(s.connection, s.lastUsbError))
                 val streaming = s.connection is ConnectionState.Streaming
                 // Anything but Streaming means the last frame is stale (unplug, error, reconnect):
                 // drop it so the view falls back to its status text instead of a frozen picture.

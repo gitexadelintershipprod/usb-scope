@@ -1,6 +1,8 @@
 package com.technicallyvu.scope.usb
 
 import android.Manifest
+import android.app.AppOpsManager
+import android.hardware.SensorPrivacyManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
@@ -43,6 +45,7 @@ data class UsbDiagnosticDevice(
     val matchingDriverIds: List<String>,
     val interfaces: List<UsbDiagnosticInterface>,
     val inspectionErrors: List<String> = emptyList(),
+    val attachmentLabel: String? = null,
 )
 
 data class UsbDiagnosticSnapshot(
@@ -59,6 +62,10 @@ data class UsbDiagnosticSnapshot(
     val devices: List<UsbDiagnosticDevice>,
     val enumerationError: String? = null,
     val isochronousSupported: Boolean = false,
+    val appPackage: String = "",
+    val appUid: Int = -1,
+    val cameraAppOp: String = "not queried",
+    val cameraPrivacyCapability: String = "not queried",
 )
 
 /** No USB open, control/bulk transfers, permission requests, serial reads, files or network calls. */
@@ -108,6 +115,7 @@ object UsbDiagnostics {
                     permission.exceptionOrNull()?.let { add("USB permission: ${it.javaClass.simpleName}") }
                     matches.exceptionOrNull()?.let { add("Driver matching: ${it.javaClass.simpleName}") }
                 },
+                attachmentLabel = UsbEventTrace.label(AndroidDeviceSource.identity(device)),
             )
         }
         val snapshot = UsbDiagnosticSnapshot(
@@ -124,8 +132,40 @@ object UsbDiagnostics {
             devices = descriptions,
             enumerationError = enumeration.exceptionOrNull()?.javaClass?.simpleName,
             isochronousSupported = NativeIsochronous.available,
+            appPackage = context.packageName,
+            appUid = android.os.Process.myUid(),
+            cameraAppOp = cameraAppOp(context),
+            cameraPrivacyCapability = cameraPrivacyCapability(context),
         )
-        return UsbDiagnosticsResult(formatUsbDiagnostics(snapshot), devices)
+        return UsbDiagnosticsResult(formatUsbDiagnostics(snapshot) + "\n\n" + UsbEventTrace.exportText(), devices)
+    }
+
+    private fun cameraAppOp(context: Context): String = runCatching {
+        val manager = context.getSystemService(AppOpsManager::class.java) ?: return@runCatching "service unavailable"
+        val mode = manager.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_CAMERA, android.os.Process.myUid(), context.packageName)
+        val name = when (mode) {
+            AppOpsManager.MODE_ALLOWED -> "allowed"
+            AppOpsManager.MODE_IGNORED -> "ignored"
+            AppOpsManager.MODE_ERRORED -> "errored"
+            AppOpsManager.MODE_DEFAULT -> "default"
+            AppOpsManager.MODE_FOREGROUND -> "foreground"
+            else -> "unknown"
+        }
+        "$name ($mode); diagnostic only"
+    }.getOrElse { "unavailable (${it.javaClass.simpleName})" }
+
+    private fun cameraPrivacyCapability(context: Context): String {
+        if (Build.VERSION.SDK_INT < 31) return "not exposed on this Android version"
+        return runCatching {
+            val manager = context.getSystemService(SensorPrivacyManager::class.java)
+                ?: return@runCatching "service unavailable"
+            val supported = manager.supportsSensorToggle(SensorPrivacyManager.Sensors.CAMERA)
+            if (Build.VERSION.SDK_INT >= 33) {
+                val software = manager.supportsSensorToggle(SensorPrivacyManager.TOGGLE_TYPE_SOFTWARE, SensorPrivacyManager.Sensors.CAMERA)
+                val hardware = manager.supportsSensorToggle(SensorPrivacyManager.TOGGLE_TYPE_HARDWARE, SensorPrivacyManager.Sensors.CAMERA)
+                "supported=$supported; software=$software; hardware=$hardware"
+            } else "supported=$supported"
+        }.getOrElse { "unavailable (${it.javaClass.simpleName})" }
     }
 }
 
@@ -193,7 +233,11 @@ fun formatUsbDiagnostics(snapshot: UsbDiagnosticSnapshot): String = buildString 
     appendLine("Android: ${oneLine(snapshot.androidRelease)}, SDK ${snapshot.sdk}, OS build ${oneLine(snapshot.osBuild)}")
     appendLine("Device: ${oneLine(snapshot.manufacturer)} ${oneLine(snapshot.model)}")
     appendLine("USB host feature: ${snapshot.usbHostSupported}")
+    if (snapshot.appPackage.isNotEmpty()) appendLine("App context: ${oneLine(snapshot.appPackage)}; UID=${snapshot.appUid}")
     appendLine("CAMERA permission granted: ${snapshot.cameraGranted}")
+    appendLine("CAMERA app-op: ${oneLine(snapshot.cameraAppOp)}")
+    appendLine("Camera privacy switch capabilities: ${oneLine(snapshot.cameraPrivacyCapability)}")
+    appendLine("Camera privacy switch state: not readable through the public Android API")
     appendLine("Native isochronous transport available: ${snapshot.isochronousSupported}")
     if (snapshot.enumerationError != null) {
         appendLine("USB enumeration: ERROR (${oneLine(snapshot.enumerationError)})")
@@ -209,6 +253,7 @@ fun formatUsbDiagnostics(snapshot: UsbDiagnosticSnapshot): String = buildString 
     snapshot.devices.forEachIndexed { index, device ->
         appendLine()
         appendLine("USB device ${index + 1}: ${hex(device.vendorId, 4)}:${hex(device.productId, 4)}")
+        device.attachmentLabel?.let { appendLine("  Attachment: ${oneLine(it)}") }
         appendLine("  Device class: ${usbClassSummary(device.usbClass)}, subclass=0x${hex(device.subclass, 2)}, protocol=0x${hex(device.protocol, 2)}")
         appendLine("  USB permission granted: ${device.usbPermissionGranted ?: "unknown"}")
         appendLine("  CAMERA permission required: ${device.cameraPermissionRequired ?: "unknown"}")
@@ -217,7 +262,7 @@ fun formatUsbDiagnostics(snapshot: UsbDiagnosticSnapshot): String = buildString 
             device.inspectionErrors.isNotEmpty() -> "Attached; read-only inspection incomplete."
             device.matchingDriverIds.isEmpty() -> "Attached, but unsupported by the current driver matching rules."
             device.cameraPermissionRequired == true && !snapshot.cameraGranted -> "Attached and matched; CAMERA permission is missing."
-            device.usbPermissionGranted == false -> "Attached and matched; USB permission is missing."
+            device.usbPermissionGranted == false -> "Attached and matched; Android currently denies USB access. See the permission event history."
             device.usbPermissionGranted == null -> "Attached and matched; USB permission state is unknown."
             else -> "Attached and matched; permission gates open. Stream negotiation has not been tested."
         }

@@ -50,7 +50,7 @@ class UsbDiagnosticsTest {
         assertTrue(unsupported.contains("DriverRegistry matches (alt 0): none"))
         assertTrue(unsupported.contains("unsupported by the current driver matching rules"))
         val permission = formatUsbDiagnostics(snapshot(listOf(camera(usbPermission = false))))
-        assertTrue(permission.contains("USB permission is missing"))
+        assertTrue(permission.contains("Android currently denies USB access"))
         val cameraPermission = formatUsbDiagnostics(snapshot(listOf(camera()), cameraGranted = false))
         assertTrue(cameraPermission.contains("CAMERA permission is missing"))
     }

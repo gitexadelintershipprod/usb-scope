@@ -2,7 +2,13 @@
 
 ## Latest update — 2026-11-01
 
-[Download the Android APK with isochronous camera support](https://github.com/gitexadelintershipprod/usb-scope/releases/download/v0.3.1-a17.3/USB-Scope-A17-0.3.1-a17.3.apk)
+USB diagnostics now includes a bounded, local event history of permission requests/replies, actual USB-access
+changes, connection opens/closes and anonymous attachment generations. This helps distinguish an Android
+permission denial from a camera that reconnects and loses its temporary grant. Copy the report after tapping
+Allow, without unplugging the camera. Current global sensor privacy state is not accessible through the public
+Android API; the report explicitly distinguishes capability queries from state.
+
+[Download the Android APK with USB permission tracing](https://github.com/gitexadelintershipprod/usb-scope/releases/download/v0.3.1-a17.4/USB-Scope-A17-0.3.1-a17.4.apk)
 
 This fork fixes USB video-camera permission handling on modern Android, including Android 17.
 Android now also reads **isochronous UVC cameras**, including the reported 349C:0411 connection layout,

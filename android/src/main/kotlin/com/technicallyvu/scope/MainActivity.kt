@@ -27,6 +27,7 @@ import com.technicallyvu.scope.settings.AppSettings
 import com.technicallyvu.scope.ui.ScopeScreen
 import com.technicallyvu.scope.ui.ScopeViewModel
 import com.technicallyvu.scope.ui.theme.ScopeTheme
+import com.technicallyvu.scope.usb.UsbEventTrace
 import com.technicallyvu.scope.usb.AndroidDeviceSource
 import com.technicallyvu.scope.usb.UsbPermissionDevice
 import com.technicallyvu.scope.usb.UsbPermissionRequest
@@ -43,10 +44,12 @@ class MainActivity : ComponentActivity() {
     private var permissionRequests = UsbPermissionRequests()
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        UsbEventTrace.record("camera permission reply", "reported=$granted; actual=${hasCameraPermission()}")
         val request = permissionRequests.externalResult(UsbPermissionStep.Camera) ?: return@registerForActivityResult
         continueAfterCamera(request, granted && hasCameraPermission())
     }
     private val cameraSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        UsbEventTrace.record("camera settings return", "actual=${hasCameraPermission()}")
         val request = permissionRequests.externalResult(UsbPermissionStep.Settings) ?: return@registerForActivityResult
         continueAfterCamera(request, hasCameraPermission())
     }
@@ -57,7 +60,12 @@ class MainActivity : ComponentActivity() {
             val device = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
             val request = permissionRequests.usbResult(
                 intent.data?.lastPathSegment, device?.let { AndroidDeviceSource.identity(it) },
-            ) ?: return
+            )
+            val reply = if (intent.hasExtra(UsbManager.EXTRA_PERMISSION_GRANTED))
+                intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false).toString() else "missing"
+            if (device != null) tracePermission("USB permission reply", device, "reported=$reply; requestMatched=${request != null}")
+            else UsbEventTrace.record("USB permission reply", "reported=$reply; missing device; requestMatched=${request != null}")
+            if (request == null) return
             val attached = connectedDevice(request.device)
             if (attached == null) {
                 disconnected(request)
@@ -73,20 +81,31 @@ class MainActivity : ComponentActivity() {
     private val detachReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val device = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java) ?: return
-            permissionRequests.detach(device.deviceName)?.let(::cancelUsbIntent)
-            vm.onDeviceDetached(device.deviceName)
+            when (intent.action) {
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    UsbEventTrace.onDetached(AndroidDeviceSource.identity(device))
+                    permissionRequests.detach(device.deviceName)?.let(::cancelUsbIntent)
+                    vm.onDeviceDetached(device.deviceName)
+                }
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> tracePermission("USB attach broadcast", device)
+            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UsbEventTrace.record("activity create", "package=$packageName; uid=${android.os.Process.myUid()}; recreated=${savedInstanceState != null}")
+        traceAttachmentIntent(intent)
         restorePermissionRequest(savedInstanceState)
         enableEdgeToEdge()
         ContextCompat.registerReceiver(
             this, permissionReceiver, IntentFilter(ACTION_USB_PERMISSION), ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         // This receiver accepts only a protected system broadcast, never app-defined actions.
-        registerReceiver(detachReceiver, IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED))
+        registerReceiver(detachReceiver, IntentFilter().apply {
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+        })
         setContent {
             ScopeTheme {
                 val keepScreenOn by vm.keepScreenOn.collectAsState()
@@ -108,7 +127,25 @@ class MainActivity : ComponentActivity() {
     private fun canOpen(device: UsbDevice): Boolean =
         (!AndroidDeviceSource.requiresCameraPermission(device) || hasCameraPermission()) && usb.hasPermission(device)
 
+    private fun tracePermission(stage: String, device: UsbDevice, detail: String = "") {
+        val granted = runCatching { usb.hasPermission(device) }.getOrNull()
+        UsbEventTrace.recordDevice(stage, AndroidDeviceSource.identity(device),
+            "$detail; actualUSB=${granted ?: "unknown"}; CAMERA=${hasCameraPermission()}")
+    }
+
+    private fun traceAttachmentIntent(intent: Intent?) {
+        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
+        IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+            ?.let { tracePermission("USB attach intent", it) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        traceAttachmentIntent(intent)
+    }
+
     private fun requestUsbPermission(device: UsbDevice) {
+        tracePermission("Allow USB access tapped", device)
         // Recover a stale request if the detach broadcast was missed while no activity existed.
         permissionRequests.pending?.let { pending ->
             if (connectedDevice(pending.device) == null) disconnected(pending)
@@ -183,7 +220,9 @@ class MainActivity : ComponentActivity() {
             this, request.device.id, usbIntent(request),
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_CANCEL_CURRENT,
         )
+        tracePermission("USB permission requested", device, "creatorPackage=${pi.creatorPackage}; creatorUid=${pi.creatorUid}")
         usb.requestPermission(device, pi)
+        tracePermission("USB permission request returned", device)
     }
 
     private fun cancelUsbIntent(request: UsbPermissionRequest) {
@@ -206,6 +245,7 @@ class MainActivity : ComponentActivity() {
         deniedMessage: String? = null,
     ) {
         if (!permissionRequests.finish(request)) return
+        UsbEventTrace.recordDevice("permission decision", request.device, "granted=$granted; reason=${deniedMessage ?: "none"}")
         cancelUsbIntent(request)
         vm.onPermissionResult(request.device.name, granted, deniedMessage)
     }
@@ -217,7 +257,10 @@ class MainActivity : ComponentActivity() {
         permissionRequests.pending?.takeIf { it.step == UsbPermissionStep.Usb }?.let { request ->
             val device = connectedDevice(request.device)
             if (device == null) disconnected(request)
-            else if (canOpen(device)) finish(request, true)
+            else {
+                tracePermission("resume permission check", device)
+                if (canOpen(device)) finish(request, true)
+            }
         }
     }
 

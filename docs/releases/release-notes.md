@@ -2,6 +2,10 @@
 
 ### 2026-11-01
 
+- USB diagnostics records the last 64 in-memory permission and attachment events, including Android's reply and the actual USB permission state, to investigate Allow followed by denied access.
+- Camera reconnections receive anonymous attachment labels; raw USB paths, serials and wall-clock timestamps are excluded.
+- Diagnostics displays app context/UID, the camera app-op mode and publicly queryable sensor-toggle capabilities. It explicitly does not claim to read the global camera privacy switch state.
+
 - Android can read UVC cameras using isochronous transfers, including the reported 349C:0411 endpoint layout, with the existing Camera/USB approvals.
 - Isochronous cameras use an advertised preview size and frame rate suited to the endpoint capacity. Packet loss discards damaged frames rather than displaying corrupt data.
 - Transfer stalls now report useful errors; the last USB error remains available in diagnostics during automatic reconnect.
