@@ -55,7 +55,7 @@ per-model rotation setting above.
 
 When you open USB diagnostics, the app reads the devices Android currently exposes: USB vendor/product IDs,
 interface classes, alternate settings and endpoint types, together with app/Android versions, phone model and
-permission states, the app UID/context and camera operation mode. The report also includes the last 64
+permission states, the app UID/context, process importance and raw/effective camera operation modes. The report also includes the last 64
 process-local USB permission/open/close/attachment events, with relative times and anonymous attachment labels.
 The event history is bounded in memory and lost when the app process exits; it is not written to a file.
 It reads no serial number, does not open a USB connection for the report, and does not save

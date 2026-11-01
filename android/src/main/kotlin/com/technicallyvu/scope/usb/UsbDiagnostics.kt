@@ -2,6 +2,7 @@ package com.technicallyvu.scope.usb
 
 import android.Manifest
 import android.app.AppOpsManager
+import android.app.ActivityManager
 import android.hardware.SensorPrivacyManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -66,6 +67,8 @@ data class UsbDiagnosticSnapshot(
     val appUid: Int = -1,
     val cameraAppOp: String = "not queried",
     val cameraPrivacyCapability: String = "not queried",
+    val cameraAppOpRaw: String = "not queried",
+    val processImportance: String = "not queried",
 )
 
 /** No USB open, control/bulk transfers, permission requests, serial reads, files or network calls. */
@@ -136,13 +139,26 @@ object UsbDiagnostics {
             appUid = android.os.Process.myUid(),
             cameraAppOp = cameraAppOp(context),
             cameraPrivacyCapability = cameraPrivacyCapability(context),
+            cameraAppOpRaw = cameraAppOp(context, raw = true),
+            processImportance = runCatching {
+                val state = ActivityManager.RunningAppProcessInfo()
+                ActivityManager.getMyMemoryState(state)
+                "${state.importance} (foreground=${state.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND}); diagnostic only"
+            }.getOrElse { "unavailable (${it.javaClass.simpleName})" },
         )
         return UsbDiagnosticsResult(formatUsbDiagnostics(snapshot) + "\n\n" + UsbEventTrace.exportText(), devices)
     }
 
-    private fun cameraAppOp(context: Context): String = runCatching {
+    private fun cameraAppOp(context: Context, raw: Boolean = false): String = runCatching {
         val manager = context.getSystemService(AppOpsManager::class.java) ?: return@runCatching "service unavailable"
-        val mode = manager.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_CAMERA, android.os.Process.myUid(), context.packageName)
+        val mode = if (Build.VERSION.SDK_INT >= 36) {
+            if (raw) manager.checkOpRawNoThrow(AppOpsManager.OPSTR_CAMERA, android.os.Process.myUid(), context.packageName, null)
+            else manager.checkOpNoThrow(AppOpsManager.OPSTR_CAMERA, android.os.Process.myUid(), context.packageName, null)
+        } else {
+            @Suppress("DEPRECATION")
+            if (raw) manager.unsafeCheckOpRawNoThrow(AppOpsManager.OPSTR_CAMERA, android.os.Process.myUid(), context.packageName)
+            else manager.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_CAMERA, android.os.Process.myUid(), context.packageName)
+        }
         val name = when (mode) {
             AppOpsManager.MODE_ALLOWED -> "allowed"
             AppOpsManager.MODE_IGNORED -> "ignored"
@@ -236,6 +252,8 @@ fun formatUsbDiagnostics(snapshot: UsbDiagnosticSnapshot): String = buildString 
     if (snapshot.appPackage.isNotEmpty()) appendLine("App context: ${oneLine(snapshot.appPackage)}; UID=${snapshot.appUid}")
     appendLine("CAMERA permission granted: ${snapshot.cameraGranted}")
     appendLine("CAMERA app-op: ${oneLine(snapshot.cameraAppOp)}")
+    appendLine("CAMERA app-op raw: ${oneLine(snapshot.cameraAppOpRaw)}")
+    appendLine("App process importance: ${oneLine(snapshot.processImportance)}")
     appendLine("Camera privacy switch capabilities: ${oneLine(snapshot.cameraPrivacyCapability)}")
     appendLine("Camera privacy switch state: not readable through the public Android API")
     appendLine("Native isochronous transport available: ${snapshot.isochronousSupported}")

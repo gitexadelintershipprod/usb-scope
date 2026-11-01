@@ -362,7 +362,9 @@ class ScopeViewModel(app: Application, private val appSettings: AppSettings) : A
         newSession.start()
         stateJob = viewModelScope.launch {
             newSession.state.collect { s ->
-                if (!replaying) UsbEventTrace.recordState("viewer", usbDiagnosticStatus(s.connection, s.lastUsbError))
+                if (!replaying) usbDiagnosticTraceStatus(s.connection, s.lastUsbError)?.let {
+                    UsbEventTrace.recordState("viewer", it)
+                }
                 val streaming = s.connection is ConnectionState.Streaming
                 // Anything but Streaming means the last frame is stale (unplug, error, reconnect):
                 // drop it so the view falls back to its status text instead of a frozen picture.

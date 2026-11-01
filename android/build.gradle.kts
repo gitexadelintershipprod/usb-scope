@@ -16,8 +16,9 @@ android {
         applicationId = "com.gitexadelintershipprod.usbscope"
         minSdk = 29
         targetSdk = 37
-        versionCode = 7
-        versionName = "0.3.1-a17.4"
+        testInstrumentationRunner = "com.technicallyvu.scope.usb.UsbPermissionIntentInstrumentation"
+        versionCode = 8
+        versionName = "0.3.1-a17.5"
         buildConfigField("String", "GIT_SHA", "\"${gitShortSha()}\"")
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")

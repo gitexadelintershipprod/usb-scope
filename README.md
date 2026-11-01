@@ -2,16 +2,16 @@
 
 ## Latest update — 2026-11-01
 
-USB diagnostics now includes a bounded, local event history of permission requests/replies, actual USB-access
-changes, connection opens/closes and anonymous attachment generations. This helps distinguish an Android
-permission denial from a camera that reconnects and loses its temporary grant. Copy the report after tapping
-Allow, without unplugging the camera. Current global sensor privacy state is not accessible through the public
-Android API; the report explicitly distinguishes capability queries from state.
+USB permission replies now reach the receiver when Android returns the request's callback URI. Repeated
+retries no longer push permission events out of the local diagnostic history. The report distinguishes raw
+camera app-op mode from the effective result and includes this app's process importance, without treating
+either as proof of the USB service's decision. Copy the report after tapping Allow, without unplugging the
+camera. [Full release notes](docs/releases/release-notes.md).
 
-[Download the Android APK with USB permission tracing](https://github.com/gitexadelintershipprod/usb-scope/releases/download/v0.3.1-a17.4/USB-Scope-A17-0.3.1-a17.4.apk)
+[Download the Android APK with corrected permission replies](https://github.com/gitexadelintershipprod/usb-scope/releases/download/v0.3.1-a17.5/USB-Scope-A17-0.3.1-a17.5.apk)
 
-This fork fixes USB video-camera permission handling on modern Android, including Android 17.
-Android now also reads **isochronous UVC cameras**, including the reported 349C:0411 connection layout,
+This fork adds Camera/USB permission handling and diagnostics for modern Android, including Android 17.
+The Android driver implements **isochronous UVC input**, including the reported 349C:0411 connection layout,
 using the file descriptor Android authorizes. The camera needs no root or additional permissions.
 See [native transport and validation](docs/isochronous-usb-a17.md) for limits and test evidence.
 The latest Android build adds **USB diagnostics** on the no-picture and About screens: inspect every attached
@@ -33,7 +33,7 @@ must still be tested. Isochronous support is implemented for Android; the deskto
 ## Upstream project
 
 Privacy-first, open-source viewer for cheap USB endoscopes that ship with untrusted vendor apps.
-The full privacy policy is in [docs/privacy-policy.md](docs/privacy-policy.md): conditional Camera permission for USB video devices, no network, no data collected.
+The full privacy policy is in [docs/privacy-policy.md](docs/privacy-policy.md): conditional Camera permission for USB video devices, no network, no telemetry or automatic uploads.
 First supported device: USB 2CE3:3828 / 0329:2022 endoscopes. Verified on hardware in the `i4season-yuv`
 personality (single interface, YUYV); the `useeplus` personality (dual interface, MJPEG) is implemented
 from public protocol documentation and has not been exercised on a device here.

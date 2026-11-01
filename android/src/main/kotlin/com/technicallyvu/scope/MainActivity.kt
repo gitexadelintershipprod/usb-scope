@@ -30,6 +30,7 @@ import com.technicallyvu.scope.ui.theme.ScopeTheme
 import com.technicallyvu.scope.usb.UsbEventTrace
 import com.technicallyvu.scope.usb.AndroidDeviceSource
 import com.technicallyvu.scope.usb.UsbPermissionDevice
+import com.technicallyvu.scope.usb.UsbPermissionIntents
 import com.technicallyvu.scope.usb.UsbPermissionRequest
 import com.technicallyvu.scope.usb.UsbPermissionRequests
 import com.technicallyvu.scope.usb.UsbPermissionStep
@@ -99,7 +100,7 @@ class MainActivity : ComponentActivity() {
         restorePermissionRequest(savedInstanceState)
         enableEdgeToEdge()
         ContextCompat.registerReceiver(
-            this, permissionReceiver, IntentFilter(ACTION_USB_PERMISSION), ContextCompat.RECEIVER_NOT_EXPORTED,
+            this, permissionReceiver, UsbPermissionIntents.createFilter(packageName), ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         // This receiver accepts only a protected system broadcast, never app-defined actions.
         registerReceiver(detachReceiver, IntentFilter().apply {
@@ -210,8 +211,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun usbIntent(request: UsbPermissionRequest): Intent =
-        Intent(ACTION_USB_PERMISSION).setPackage(packageName)
-            .setData(Uri.parse("scope-usb-permission://$packageName/${request.token}"))
+        UsbPermissionIntents.createIntent(packageName, request.token)
 
     private fun launchUsbRequest(request: UsbPermissionRequest, device: UsbDevice) {
         // A package-scoped mutable, one-shot intent lets Android supply the result extras while
@@ -298,7 +298,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        const val ACTION_USB_PERMISSION = "com.technicallyvu.scope.USB_PERMISSION"
+        const val ACTION_USB_PERMISSION = UsbPermissionIntents.ACTION
         const val PREFS_NAME = "scope_settings"
         private const val CAMERA_ASKED = "camera_permission_asked"
         private const val STATE_EXTERNAL_TOKEN = "usb_external_token"

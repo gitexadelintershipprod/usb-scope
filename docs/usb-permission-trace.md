@@ -47,3 +47,62 @@ Primary references:
 - [AOSP USB user permission manager](https://android.googlesource.com/platform/frameworks/base/+/master/services/usb/java/com/android/server/usb/UsbUserPermissionManager.java)
 - [AOSP USB permission dialog](https://android.googlesource.com/platform/frameworks/base/+/master/packages/SystemUI/src/com/android/systemui/usb/UsbPermissionActivity.java)
 - [Public sensor privacy API](https://developer.android.com/reference/android/hardware/SensorPrivacyManager)
+
+
+## Callback delivery correction (0.3.1-a17.5, versionCode 8)
+
+The A17.4 Motorola report contains two USB permission requests, no received USB replies and no
+observed re-enumeration in its retained window. Camera runtime permission becomes granted; its
+camera app-op check reports ignored. These facts do not prove why Android still reports USB access denied.
+
+A concrete app defect was found: the PendingIntent contains a token-bearing
+`scope-usb-permission://<package>/<token>` URI, but the dynamically registered IntentFilter accepted
+only the action and no data. Android rejects a data-bearing intent against that filter. The new shared
+helper builds both the callback intent and a filter matching its scheme and exact package authority.
+The receiver remains non-exported. Its UUID token, current USB attachment and actual permission checks
+remain required before the app accepts a grant.
+
+Repeated Connecting/error retry pairs previously filled the 64-entry history in about 32 seconds.
+The trace now omits the intermediate Connecting state while a previous USB error is retained;
+the unchanged error coalesces. Explicit user requests/replies and real permission/attachment changes
+are still recorded. A regression simulates 600 failed retries and verifies the request/reply survives,
+then verifies streaming recovery and a changed failure remain visible.
+
+Diagnostics adds the raw camera app-op mode and this process's importance. Raw mode avoids converting
+foreground-only into its effective result, but can still reflect system restrictions. Neither the raw
+mode, effective mode nor importance proves the USB service's decision. No app-op is modified and no
+permission, foreground service or internal camera access is added.
+
+The callback correction fixes a real delivery defect. It is not evidence that the phone now grants USB
+access: AOSP's positive USB confirmation grants UID access before sending the callback, and the session
+already polls actual authorization independently. Physical permission acceptance and streaming still need
+the user's updated report.
+
+Regression checks use Android's actual IntentFilter implementation against the production helper loaded
+from the APK, plus a separate dependency-free androidTest instrumentation runner for same-UID mutable
+one-shot PendingIntent delivery. Test code is not included in the release APK. An external shell broadcast with the correct callback
+URI must still be rejected by the non-exported receiver; a data-less broadcast alone would only test
+the URI filter.
+
+Additional references:
+- [IntentFilter data matching](https://developer.android.com/reference/android/content/IntentFilter#matchData(java.lang.String,%20java.lang.String,%20android.net.Uri))
+- [AppOpsManager raw/effective modes](https://developer.android.com/reference/android/app/AppOpsManager)
+
+
+A17.5 build validation: 180 core + 84 Android JVM tests passed (264 total), with no failures, errors
+or skipped tests. Release lint reports zero errors. Live authorization and streaming on the Motorola
+remain unverified until the user tests the updated APK.
+
+Reproduce the delivery test inside an existing Android SDK environment:
+
+```sh
+./gradlew :android:assembleDebug :android:assembleAndroidTest
+adb install -r android/build/outputs/apk/debug/android-debug.apk
+adb install -r android/build/outputs/apk/androidTest/debug/android-debug-androidTest.apk
+adb shell am instrument -w com.gitexadelintershipprod.usbscope.test/com.technicallyvu.scope.usb.UsbPermissionIntentInstrumentation
+```
+
+Use an isolated emulator; debug and release builds have different signing keys. The test registers a
+private receiver with the production filter, sends mutable one-shot PendingIntents with both granted
+and denied extras, and checks token preservation and one-shot replay rejection. It does not claim to
+emulate the actual USB service's authorization decision.

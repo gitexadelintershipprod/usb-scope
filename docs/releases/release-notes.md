@@ -2,6 +2,9 @@
 
 ### 2026-11-01
 
+- Android's USB permission reply is received correctly when it includes the request's callback URI; permission and attachment validation remain required.
+- Repeated connection retries no longer evict the permission request/reply from diagnostic history. The report separates raw and effective camera app-op modes and shows app process importance; these are diagnostic information, not a USB authorization bypass.
+
 - USB diagnostics records the last 64 in-memory permission and attachment events, including Android's reply and the actual USB permission state, to investigate Allow followed by denied access.
 - Camera reconnections receive anonymous attachment labels; raw USB paths, serials and wall-clock timestamps are excluded.
 - Diagnostics displays app context/UID, the camera app-op mode and publicly queryable sensor-toggle capabilities. It explicitly does not claim to read the global camera privacy switch state.
